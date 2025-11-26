@@ -6,6 +6,13 @@ require_once __DIR__ . '/../app/helpers.php';
 require_role('reseller');
 $user = current_user();
 
+if (!function_exists('format_rupiah')) {
+    function format_rupiah(int $v): string
+    {
+        return 'Rp ' . number_format($v, 0, ',', '.');
+    }
+}
+
 $id = (int) ($_GET['id'] ?? 0);
 
 // Ambil data order milik reseller yang sedang login
@@ -22,11 +29,13 @@ if (!$order) {
     die("Order tidak ditemukan");
 }
 
-// Ambil item order, dukung produk custom
+// Ambil item order, dukung produk custom + harga
 $stmt = $pdo->prepare("
     SELECT 
         oi.*,
         p.code,
+        p.voltage,
+        p.price AS unit_price,
         COALESCE(oi.custom_name, p.name) AS name
     FROM order_items oi
     LEFT JOIN products p ON p.id = oi.product_id
@@ -34,6 +43,47 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$id]);
 $items = $stmt->fetchAll();
+
+// Hitung total order berdasarkan harga produk
+$totalOrder = 0;
+$totalQtyOrder = 0;
+foreach ($items as $it) {
+    $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
+    $qty = (int) $it['qty_order'];
+    $totalQtyOrder += $qty;
+    if ($price > 0 && $qty > 0) {
+        $totalOrder += $price * $qty;
+    }
+}
+
+// Ambil data pembayaran untuk order ini
+$stmt = $pdo->prepare("
+    SELECT * 
+    FROM order_payments 
+    WHERE order_id = ? 
+    ORDER BY pay_date, id
+");
+$stmt->execute([$id]);
+$payments = $stmt->fetchAll();
+
+$totalPaid = 0;
+foreach ($payments as $pay) {
+    $totalPaid += (int) $pay['amount'];
+}
+
+$sisaBayar = max($totalOrder - $totalPaid, 0);
+
+// Status pembayaran
+if ($totalOrder > 0 && $totalPaid >= $totalOrder) {
+    $statusBayar = 'Lunas';
+    $statusBayarClass = 'success';
+} elseif ($totalPaid > 0) {
+    $statusBayar = 'Belum Lunas';
+    $statusBayarClass = 'warning';
+} else {
+    $statusBayar = 'Belum Ada Pembayaran';
+    $statusBayarClass = 'secondary';
+}
 
 // Ambil data pengiriman
 $stmt = $pdo->prepare("SELECT * FROM shipments WHERE order_id = ? ORDER BY ship_date");
@@ -69,9 +119,12 @@ include __DIR__ . '/../partials/header.php';
 ?>
 <h3 class="mb-3">Detail Order <?= esc($order['code']) ?></h3>
 
-<div class="mb-3">
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
     <span class="badge bg-<?= badge_status($order['status']) ?>">
         <?= esc(format_status($order['status'])) ?>
+    </span>
+    <span class="badge bg-<?= esc($statusBayarClass) ?>">
+        Pembayaran: <?= esc($statusBayar) ?>
     </span>
 </div>
 
@@ -79,7 +132,16 @@ include __DIR__ . '/../partials/header.php';
     <div class="card-body">
         <p><strong>Reseller:</strong> <?= esc($order['reseller_name']) ?></p>
         <p><strong>Tanggal Order:</strong> <?= esc($order['order_date']) ?></p>
+        <p><strong>Total Qty Order:</strong> <?= (int) $totalQtyOrder ?></p>
+
+        <hr>
+
+        <p class="mb-1"><strong>Total Order:</strong> <?= format_rupiah($totalOrder) ?></p>
+        <p class="mb-1"><strong>Sudah Dibayar:</strong> <?= format_rupiah($totalPaid) ?></p>
+        <p class="mb-0"><strong>Sisa Pembayaran:</strong> <?= format_rupiah($sisaBayar) ?></p>
+
         <?php if ($order['notes_reseller']): ?>
+            <hr>
             <p><strong>Catatan Anda:</strong><br><?= nl2br(esc($order['notes_reseller'])) ?></p>
         <?php endif; ?>
         <?php if ($order['notes_internal']): ?>
@@ -93,37 +155,86 @@ include __DIR__ . '/../partials/header.php';
     <table class="table table-sm table-striped align-middle">
         <thead>
             <tr>
-                <th>No</th>
-                <th>Nama Produk</th>
-                <th>Qty Pesan</th>
-                <th>Produksi Selesai</th>
-                <th>Sudah Dikirim</th>
-                <th>Sisa Kirim</th>
+                <th class="text-nowrap text-center">No</th>
+                <th class="text-nowrap text-center" style="min-width:240px;">Nama Produk</th>
+                <th class="text-nowrap text-center">Qty Pesan</th>
+                <th class="text-nowrap text-center" style="min-width:140px;">Harga / pcs</th>
+                <th class="text-nowrap text-center" style="min-width:140px;">Subtotal</th>
+                <th class="text-nowrap text-center">Produksi Selesai</th>
+                <th class="text-nowrap text-center">Sudah Dikirim</th>
+                <th class="text-nowrap text-center">Sisa Kirim</th>
             </tr>
         </thead>
         <tbody>
             <?php if (!$items): ?>
                 <tr>
-                    <td colspan="6" class="text-center text-muted">Belum ada item.</td>
+                    <td colspan=" 8" class="text-center text-muted">Belum ada item.</td>
                 </tr>
             <?php else: ?>
-                <?php $no = 1;
+                <?php
+                $no = 1;
                 foreach ($items as $it):
                     $sisa = $it['qty_order'] - $it['qty_shipped'];
+                    $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
+                    $qty = (int) $it['qty_order'];
+                    $sub = $price > 0 && $qty > 0 ? $price * $qty : 0;
                     ?>
                     <tr>
-                        <td><?= $no++ ?></td>
-                        <td><?= esc($it['name']) ?></td>
-                        <td><?= (int) $it['qty_order'] ?></td>
-                        <td><?= (int) $it['qty_done'] ?></td>
-                        <td><?= (int) $it['qty_shipped'] ?></td>
-                        <td><?= (int) $sisa ?></td>
+                        <td class="text-nowrap text-center"><?= $no++ ?></td>
+                        <td><?= esc($it['name']) ?>         <?php
+                                   if (esc($it['voltage']) === '-') {
+
+                                   } else
+                                       echo '(' . esc($it['voltage']) . 'V)' ?></td>
+                            <td class="text-center"><?= (int) $it['qty_order'] ?></td>
+                        <td class="text-center">
+                            <?= $price > 0 ? format_rupiah($price) : '<span class="text-muted">-</span>' ?>
+                        </td>
+                        <td class="text-center">
+                            <?= $sub > 0 ? format_rupiah($sub) : '<span class="text-muted">-</span>' ?>
+                        </td>
+                        <td class="text-center"><?= (int) $it['qty_done'] ?></td>
+                        <td class="text-center"><?= (int) $it['qty_shipped'] ?></td>
+                        <td class="text-center"> <?php
+                        if ($sisa === 0) {
+                            echo '<span class="badge bg-success">
+        0
+    </span>';
+                        } else {
+                            echo (int) $sisa;
+                        }
+
+                        ?></td>
                     </tr>
                 <?php endforeach; ?>
             <?php endif; ?>
         </tbody>
     </table>
 </div>
+
+<?php if ($payments): ?>
+    <h5>Pembayaran</h5>
+    <div class="table-responsive mb-4">
+        <table class="table table-sm table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Tanggal</th>
+                    <th>Nominal</th>
+                    <th>Catatan</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($payments as $p): ?>
+                    <tr>
+                        <td><?= esc($p['pay_date']) ?></td>
+                        <td><?= format_rupiah((int) $p['amount']) ?></td>
+                        <td><?= esc($p['notes']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+<?php endif; ?>
 
 <h5>Pengiriman</h5>
 <?php if (!$shipments): ?>

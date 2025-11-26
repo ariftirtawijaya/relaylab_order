@@ -7,11 +7,19 @@ require_role('reseller');
 $user = current_user();
 $resellerId = $user['reseller_id'];
 
-$stmt = $pdo->prepare("SELECT o.*, 
-    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
-  FROM orders o
-  WHERE o.reseller_id = ?
-  ORDER BY o.order_date DESC");
+// Ambil semua order + total qty per order
+$stmt = $pdo->prepare("
+    SELECT 
+        o.*,
+        (
+            SELECT COALESCE(SUM(qty_order), 0)
+            FROM order_items oi
+            WHERE oi.order_id = o.id
+        ) AS total_qty
+    FROM orders o
+    WHERE o.reseller_id = ?
+    ORDER BY o.order_date DESC
+");
 $stmt->execute([$resellerId]);
 $orders = $stmt->fetchAll();
 
@@ -27,7 +35,7 @@ include __DIR__ . '/../partials/header.php';
         <tr>
             <th>No</th>
             <th>Tanggal</th>
-            <th>Item</th>
+            <th>Total Qty</th>
             <th>Status</th>
             <th></th>
         </tr>
@@ -38,8 +46,12 @@ include __DIR__ . '/../partials/header.php';
             <tr>
                 <td><?= $no++ ?></td>
                 <td><?= esc($o['order_date']) ?></td>
-                <td><?= (int) $o['item_count'] ?></td>
-                <td><?= esc(format_status($o['status'])) ?></td>
+                <td><?= (int) $o['total_qty'] ?> Item</td>
+                <td>
+                    <span class="badge bg-<?= badge_status($o['status']) ?>">
+                        <?= esc(format_status($o['status'])) ?>
+                    </span>
+                </td>
                 <td class="text-end">
                     <a href="<?= base_url('reseller/order_view.php?id=' . $o['id']) ?>"
                         class="btn btn-sm btn-outline-secondary">Detail</a>

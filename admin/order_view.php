@@ -4,13 +4,21 @@ require_once __DIR__ . '/../app/auth.php';
 require_once __DIR__ . '/../app/helpers.php';
 
 require_role('admin');
+$user = current_user();
+
+if (!function_exists('format_rupiah')) {
+    function format_rupiah(int $v): string
+    {
+        return 'Rp ' . number_format($v, 0, ',', '.');
+    }
+}
 
 $id = (int) ($_GET['id'] ?? 0);
 if ($id <= 0) {
     die("Order tidak valid");
 }
 
-// ====== HANDLE: mapping item custom -> produk resmi (FITUR BARU) ======
+// ====== HANDLE: mapping item custom -> produk resmi ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['link_item'])) {
     $order_item_id = (int) ($_POST['order_item_id'] ?? 0);
     $product_id = (int) ($_POST['product_id'] ?? 0);
@@ -39,11 +47,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['link_item'])) {
         }
     }
 
-    // Apapun hasilnya, balik lagi ke halaman ini
     redirect('admin/order_view.php?id=' . $id);
 }
 
-// ====== HANDLE LAMA: update status order (TETAP) ======
+// ====== HANDLE: tambah pembayaran order ======
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_payment'])) {
+    $amount_raw = trim($_POST['amount'] ?? '');
+    // Hilangkan titik pemisah ribuan kalau ada
+    $amount_clean = str_replace(['.', ',', ' '], '', $amount_raw);
+    $amount = (int) $amount_clean;
+    $notes = trim($_POST['notes'] ?? '');
+
+    if ($amount > 0) {
+        $stmt = $pdo->prepare("
+            INSERT INTO order_payments (order_id, amount, notes, created_by)
+            VALUES (?, ?, ?, ?)
+        ");
+        $stmt->execute([$id, $amount, $notes, $user['id']]);
+    }
+
+    redirect('admin/order_view.php?id=' . $id);
+}
+
+// ====== HANDLE LAMA: update status order ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $status = $_POST['status'] ?? 'menunggu_konfirmasi';
     if (!in_array($status, ['menunggu_konfirmasi', 'diproses', 'selesai'], true)) {
@@ -140,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     }
 }
 
-// ====== AMBIL DATA ORDER (LAMA, TETAP) ======
+// ====== AMBIL DATA ORDER ======
 $stmt = $pdo->prepare("SELECT o.*, r.name AS reseller_name
   FROM orders o
   JOIN resellers r ON r.id = o.reseller_id
@@ -151,11 +177,12 @@ if (!$order) {
     die("Order tidak ditemukan");
 }
 
-// ====== AMBIL ITEM ORDER (DIUBAH UNTUK DUKUNG CUSTOM) ======
+// ====== AMBIL ITEM ORDER (SUPPORT CUSTOM + HARGA) ======
 $stmt = $pdo->prepare("
     SELECT 
         oi.*,
         p.code,
+        p.price AS unit_price,
         COALESCE(oi.custom_name, p.name) AS name,
         oi.custom_name AS raw_custom_name
     FROM order_items oi
@@ -165,11 +192,49 @@ $stmt = $pdo->prepare("
 $stmt->execute([$id]);
 $items = $stmt->fetchAll();
 
-// ====== AMBIL SEMUA PRODUK UNTUK DROPDOWN MAPPING CUSTOM (BARU) ======
+// Hitung total order dari harga produk
+$totalOrder = 0;
+foreach ($items as $it) {
+    $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
+    $qty = (int) $it['qty_order'];
+    if ($price > 0 && $qty > 0) {
+        $totalOrder += $price * $qty;
+    }
+}
+
+// ====== AMBIL SEMUA PRODUK UNTUK DROPDOWN MAPPING CUSTOM ======
 $stmt = $pdo->query("SELECT id, name, voltage FROM products ORDER BY name");
 $allProducts = $stmt->fetchAll();
 
-// ====== AMBIL PENGIRIMAN (LAMA) ======
+// ====== AMBIL PEMBAYARAN UNTUK ORDER INI ======
+$stmt = $pdo->prepare("
+    SELECT op.*, u.name AS admin_name
+    FROM order_payments op
+    LEFT JOIN users u ON u.id = op.created_by
+    WHERE op.order_id = ?
+    ORDER BY op.pay_date, op.id
+");
+$stmt->execute([$id]);
+$payments = $stmt->fetchAll();
+
+$totalPaid = 0;
+foreach ($payments as $p) {
+    $totalPaid += (int) $p['amount'];
+}
+$sisaBayar = max($totalOrder - $totalPaid, 0);
+
+if ($totalOrder > 0 && $totalPaid >= $totalOrder) {
+    $statusBayar = 'Lunas';
+    $statusBayarClass = 'success';
+} elseif ($totalPaid > 0) {
+    $statusBayar = 'Belum Lunas';
+    $statusBayarClass = 'warning';
+} else {
+    $statusBayar = 'Belum Ada Pembayaran';
+    $statusBayarClass = 'secondary';
+}
+
+// ====== AMBIL PENGIRIMAN ======
 $stmt = $pdo->prepare("SELECT * FROM shipments WHERE order_id = ? ORDER BY ship_date");
 $stmt->execute([$id]);
 $shipments = $stmt->fetchAll();
@@ -203,34 +268,101 @@ include __DIR__ . '/../partials/header.php';
                 <p><strong>Reseller:</strong> <?= esc($order['reseller_name']) ?></p>
                 <p><strong>Tanggal Order:</strong> <?= esc($order['order_date']) ?></p>
                 <p><strong>Total Qty:</strong> <?= (int) $order['total_qty'] ?></p>
+                <hr>
+                <p class="mb-1"><strong>Total Order:</strong> <?= format_rupiah($totalOrder) ?></p>
+                <p class="mb-1"><strong>Sudah Dibayar:</strong> <?= format_rupiah($totalPaid) ?></p>
+                <p class="mb-2"><strong>Sisa Pembayaran:</strong> <?= format_rupiah($sisaBayar) ?></p>
+                <span class="badge bg-<?= esc($statusBayarClass) ?>">
+                    Status Pembayaran: <?= esc($statusBayar) ?>
+                </span>
             </div>
         </div>
+
         <div class="card mb-3">
             <div class="card-body">
                 <form method="post" class="row g-2 align-items-center">
                     <input type="hidden" name="update_status" value="1">
-                    <div class="col-auto">
+                    <div class="col-12 mb-2">
                         <label class="form-label mb-0"><strong>Status Order:</strong></label>
                     </div>
                     <div class="col-auto">
                         <select name="status" class="form-select form-select-sm">
                             <option value="menunggu_konfirmasi" <?= $order['status'] == 'menunggu_konfirmasi' ? 'selected' : ''; ?>>Menunggu Konfirmasi</option>
-                            <option value="diproses" <?= $order['status'] == 'diproses' ? 'selected' : ''; ?>>Diproses
-                            </option>
-                            <option value="selesai" <?= $order['status'] == 'selesai' ? 'selected' : ''; ?>>Selesai
-                            </option>
+                            <option value="diproses" <?= $order['status'] == 'diproses' ? 'selected' : ''; ?>>Diproses</option>
+                            <option value="selesai" <?= $order['status'] == 'selesai' ? 'selected' : ''; ?>>Selesai</option>
                         </select>
                     </div>
                     <div class="col-auto">
                         <button class="btn btn-sm btn-primary">Update</button>
                     </div>
                 </form>
+
                 <?php if ($order['notes_reseller']): ?>
-                    <hr>
-                    <p><strong>Catatan Reseller:</strong><br><?= nl2br(esc($order['notes_reseller'])) ?></p>
+                        <hr>
+                        <p><strong>Catatan Reseller:</strong><br><?= nl2br(esc($order['notes_reseller'])) ?></p>
+                <?php endif; ?>
+                <?php if ($order['notes_internal']): ?>
+                        <p><strong>Catatan Internal:</strong><br><?= nl2br(esc($order['notes_internal'])) ?></p>
                 <?php endif; ?>
             </div>
         </div>
+    </div>
+
+    <!-- Kolom kanan: Form pembayaran + riwayat pembayaran -->
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">
+                <strong>Input Pembayaran</strong>
+            </div>
+            <div class="card-body">
+                <form method="post" class="row g-2">
+                    <input type="hidden" name="add_payment" value="1">
+                    <div class="col-12">
+                        <label class="form-label">Nominal (Rp)</label>
+                        <input type="text" name="amount" class="form-control form-control-sm" placeholder="contoh: 150000">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Catatan (opsional)</label>
+                        <input type="text" name="notes" class="form-control form-control-sm" placeholder="misal: DP pertama, pelunasan, dll">
+                    </div>
+                    <div class="col-12 mt-2">
+                        <button class="btn btn-sm btn-success">Simpan Pembayaran</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <?php if ($payments): ?>
+                <div class="card">
+                    <div class="card-header">
+                        <strong>Riwayat Pembayaran</strong>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Tanggal</th>
+                                        <th>Nominal</th>
+                                        <th>Admin</th>
+                                        <th>Catatan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($payments as $p): ?>
+                                            <tr>
+                                                <td><?= esc($p['pay_date']) ?></td>
+                                                <td><?= format_rupiah((int) $p['amount']) ?></td>
+                                                <td><?= esc($p['admin_name'] ?? '-') ?></td>
+                                                <td><?= esc($p['notes']) ?></td>
+                                            </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -244,10 +376,12 @@ include __DIR__ . '/../partials/header.php';
                     <th>No</th>
                     <th>Produk</th>
                     <th>Qty Pesan</th>
+                    <th>Harga / pcs</th>
+                    <th>Subtotal</th>
                     <th>Selesai (qty_done)</th>
                     <th>Sudah Dikirim</th>
                     <th>Sisa Kirim</th>
-                    <th>Custom / Mapping</th> <!-- KOLOM BARU -->
+                    <th>Custom / Mapping</th>
                 </tr>
             </thead>
             <tbody>
@@ -255,44 +389,51 @@ include __DIR__ . '/../partials/header.php';
                 foreach ($items as $it):
                     $sisa = $it['qty_order'] - $it['qty_shipped'];
                     $isCustom = ($it['product_id'] === null);
+                    $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
+                    $qty = (int) $it['qty_order'];
+                    $sub = $price > 0 && $qty > 0 ? $price * $qty : 0;
                     ?>
-                    <tr class="<?= $isCustom ? 'table-warning' : '' ?>">
-                        <td><?= $no++ ?></td>
-                        <td>
-                            <?= esc($it['name']) ?>
-                            <?php if ($isCustom && $it['raw_custom_name']): ?>
-                                <br>
-                                <span class="badge bg-warning text-dark">Custom: butuh mapping</span>
-                            <?php endif; ?>
-                        </td>
-                        <td><?= (int) $it['qty_order'] ?></td>
-                        <td style="max-width:80px;">
-                            <input type="number" name="qty_done[<?= $it['id'] ?>]" min="0"
-                                max="<?= (int) $it['qty_order'] ?>" class="form-control form-control-sm"
-                                value="<?= (int) $it['qty_done'] ?>">
-                        </td>
-                        <td><?= (int) $it['qty_shipped'] ?></td>
-                        <td><?= (int) $sisa ?></td>
-                        <td style="min-width:200px;">
-                            <?php if ($isCustom): ?>
-                                <form method="post" class="d-flex gap-1">
-                                    <input type="hidden" name="link_item" value="1">
-                                    <input type="hidden" name="order_item_id" value="<?= (int) $it['id'] ?>">
-                                    <select name="product_id" class="form-select form-select-sm" required>
-                                        <option value="">Pilih produk...</option>
-                                        <?php foreach ($allProducts as $p): ?>
-                                            <option value="<?= $p['id'] ?>">
-                                                <?= esc($p['name']) ?> (<?= esc($p['voltage']) ?>V)
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <button type="submit" class="btn btn-sm btn-primary">Link</button>
-                                </form>
-                            <?php else: ?>
-                                <span class="badge bg-success">Normal</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
+                        <tr class="<?= $isCustom ? 'table-warning' : '' ?>">
+                            <td><?= $no++ ?></td>
+                            <td>
+                                <?= esc($it['name']) ?>
+                                <?php if ($isCustom && $it['raw_custom_name']): ?>
+                                        <br>
+                                        <span class="badge bg-warning text-dark">Custom: butuh mapping</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= (int) $it['qty_order'] ?></td>
+                            <td><?= $price > 0 ? format_rupiah($price) : '<span class="text-muted">-</span>' ?></td>
+                            <td><?= $sub > 0 ? format_rupiah($sub) : '<span class="text-muted">-</span>' ?></td>
+                            <td style="max-width:80px;">
+                                <input type="number"
+                                       name="qty_done[<?= $it['id'] ?>]" min="0"
+                                       max="<?= (int) $it['qty_order'] ?>"
+                                       class="form-control form-control-sm"
+                                       value="<?= (int) $it['qty_done'] ?>">
+                            </td>
+                            <td><?= (int) $it['qty_shipped'] ?></td>
+                            <td><?= (int) $sisa ?></td>
+                            <td style="min-width:200px;">
+                                <?php if ($isCustom): ?>
+                                        <form method="post" class="d-flex gap-1">
+                                            <input type="hidden" name="link_item" value="1">
+                                            <input type="hidden" name="order_item_id" value="<?= (int) $it['id'] ?>">
+                                            <select name="product_id" class="form-select form-select-sm" required>
+                                                <option value="">Pilih produk...</option>
+                                                <?php foreach ($allProducts as $p): ?>
+                                                        <option value="<?= $p['id'] ?>">
+                                                            <?= esc($p['name']) ?> (<?= esc($p['voltage']) ?>V)
+                                                        </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <button type="submit" class="btn btn-sm btn-primary">Link</button>
+                                        </form>
+                                <?php else: ?>
+                                        <span class="badge bg-success">Normal</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
@@ -335,16 +476,17 @@ include __DIR__ . '/../partials/header.php';
                     if ($sisa <= 0)
                         continue;
                     ?>
-                    <tr>
-                        <td><?= esc($it['name']) ?></td>
-                        <td><?= (int) $it['qty_order'] ?></td>
-                        <td><?= (int) $it['qty_shipped'] ?></td>
-                        <td><?= (int) $sisa ?></td>
-                        <td style="max-width:80px;">
-                            <input type="number" name="ship_qty[<?= $it['id'] ?>]" min="0" max="<?= (int) $sisa ?>"
-                                class="form-control form-control-sm">
-                        </td>
-                    </tr>
+                        <tr>
+                            <td><?= esc($it['name']) ?></td>
+                            <td><?= (int) $it['qty_order'] ?></td>
+                            <td><?= (int) $it['qty_shipped'] ?></td>
+                            <td><?= (int) $sisa ?></td>
+                            <td style="max-width:80px;">
+                                <input type="number"
+                                       name="ship_qty[<?= $it['id'] ?>]" min="0" max="<?= (int) $sisa ?>"
+                                       class="form-control form-control-sm">
+                            </td>
+                        </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
@@ -355,40 +497,40 @@ include __DIR__ . '/../partials/header.php';
 
 <h5>Riwayat Pengiriman</h5>
 <?php if (!$shipments): ?>
-    <p class="text-muted">Belum ada pengiriman.</p>
+        <p class="text-muted">Belum ada pengiriman.</p>
 <?php else: ?>
-    <?php foreach ($shipments as $s): ?>
-        <div class="card mb-3">
-            <div class="card-body">
-                <p class="mb-1"><strong>Tanggal Kirim:</strong> <?= esc($s['ship_date']) ?></p>
-                <p class="mb-1"><strong>Ekspedisi:</strong> <?= esc($s['courier']) ?></p>
-                <p class="mb-1"><strong>No Resi:</strong> <?= esc($s['tracking_number']) ?></p>
-                <?php if ($s['notes']): ?>
-                    <p class="mb-2"><strong>Catatan:</strong> <?= nl2br(esc($s['notes'])) ?></p>
-                <?php endif; ?>
-                <?php if (!empty($shipmentItems[$s['id']])): ?>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-bordered mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Produk</th>
-                                    <th>Qty Kirim</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($shipmentItems[$s['id']] as $si): ?>
-                                    <tr>
-                                        <td><?= esc($si['product_name']) ?></td>
-                                        <td><?= (int) $si['qty'] ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+        <?php foreach ($shipments as $s): ?>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <p class="mb-1"><strong>Tanggal Kirim:</strong> <?= esc($s['ship_date']) ?></p>
+                        <p class="mb-1"><strong>Ekspedisi:</strong> <?= esc($s['courier']) ?></p>
+                        <p class="mb-1"><strong>No Resi:</strong> <?= esc($s['tracking_number']) ?></p>
+                        <?php if ($s['notes']): ?>
+                                <p class="mb-2"><strong>Catatan:</strong> <?= nl2br(esc($s['notes'])) ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($shipmentItems[$s['id']])): ?>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Produk</th>
+                                                <th>Qty Kirim</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($shipmentItems[$s['id']] as $si): ?>
+                                                    <tr>
+                                                        <td><?= esc($si['product_name']) ?></td>
+                                                        <td><?= (int) $si['qty'] ?></td>
+                                                    </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                        <?php endif; ?>
                     </div>
-                <?php endif; ?>
-            </div>
-        </div>
-    <?php endforeach; ?>
+                </div>
+        <?php endforeach; ?>
 <?php endif; ?>
 
 <a href="<?= base_url('admin/orders.php') ?>" class="btn btn-secondary">Kembali</a>

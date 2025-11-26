@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <head>
     <meta charset="UTF-8">
-    <title>Daftar Reseller - RelayLab Order</title>
+    <title>Daftar Reseller - RelayLab Order Management System</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
@@ -136,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
 
-                <p class="text-center mt-3 text-muted small">RelayLab Order Management</p>
+                <p class="text-center mt-3 text-muted small">RelayLab Order Management System</p>
             </div>
         </div>
     </div>
