@@ -218,17 +218,18 @@ include __DIR__ . '/../partials/header.php';
         <table class="table table-sm table-striped align-middle">
             <thead>
                 <tr>
-                    <th>Tanggal</th>
-                    <th>Nominal</th>
-                    <th>Catatan</th>
+                    <th class="text-nowrap text-center">Tanggal</th>
+                    <th class="text-nowrap text-center">Nominal</th>
+                    <th class="text-nowrap text-center">Catatan</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($payments as $p): ?>
                     <tr>
-                        <td><?= esc($p['pay_date']) ?></td>
-                        <td><?= format_rupiah((int) $p['amount']) ?></td>
-                        <td><?= esc($p['notes']) ?></td>
+                        <td class="text-nowrap text-center" style="min-width: 160px;"><?= esc($p['pay_date']) ?></td>
+                        <td class="text-nowrap text-center" style="min-width: 140px;"><?= format_rupiah((int) $p['amount']) ?>
+                        </td>
+                        <td class="text-nowrap text-center"><?= esc($p['notes']) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -255,15 +256,15 @@ include __DIR__ . '/../partials/header.php';
                         <table class="table table-sm table-bordered mb-0">
                             <thead>
                                 <tr>
-                                    <th>Produk</th>
-                                    <th>Qty Kirim</th>
+                                    <th class="text-nowrap text-center align-middle">Produk</th>
+                                    <th class="text-center align-middle">Qty Kirim</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($shipmentItems[$s['id']] as $si): ?>
                                     <tr>
                                         <td><?= esc($si['product_name']) ?></td>
-                                        <td><?= (int) $si['qty'] ?></td>
+                                        <td class="text-center align-middle"><?= (int) $si['qty'] ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -275,6 +276,6 @@ include __DIR__ . '/../partials/header.php';
     <?php endforeach; ?>
 <?php endif; ?>
 
-<a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Kembali</a>
+<a href=" <?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Kembali</a>
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>
