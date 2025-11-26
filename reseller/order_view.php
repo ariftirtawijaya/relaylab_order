@@ -151,85 +151,123 @@ include __DIR__ . '/../partials/header.php';
 </div>
 
 <h5>Item Order</h5>
-<div class="table-responsive mb-4">
-    <table class="table table-sm table-striped align-middle">
-        <thead>
-            <tr>
-                <th class="text-nowrap text-center">No</th>
-                <th class="text-nowrap text-center" style="min-width:240px;">Nama Produk</th>
-                <th class="text-nowrap text-center">Qty Pesan</th>
-                <th class="text-nowrap text-center" style="min-width:140px;">Harga / pcs</th>
-                <th class="text-nowrap text-center" style="min-width:140px;">Subtotal</th>
-                <th class="text-nowrap text-center">Produksi Selesai</th>
-                <th class="text-nowrap text-center">Sudah Dikirim</th>
-                <th class="text-nowrap text-center">Sisa Kirim</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (!$items): ?>
+<div class="card mb-4">
+    <div class="card-body">
+        <table id="itemsTable" class="table table-sm table-bordered align-middle w-100">
+            <thead>
                 <tr>
-                    <td colspan=" 8" class="text-center text-muted">Belum ada item.</td>
+                    <th class="text-center">No</th>
+                    <th class="text-nowrap">Nama Produk</th>
+                    <th class="text-center align-middle">Qty Pesan</th>
+                    <th class="text-center align-middle align-items-center">Harga / pcs</th>
+                    <th class="text-center">Subtotal</th>
+                    <th class="text-center">Produksi Selesai</th>
+                    <th class="text-center">Sudah Dikirim</th>
+                    <th class="text-center">Sisa Kirim</th>
                 </tr>
-            <?php else: ?>
-                <?php
-                $no = 1;
-                foreach ($items as $it):
-                    $sisa = $it['qty_order'] - $it['qty_shipped'];
-                    $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
-                    $qty = (int) $it['qty_order'];
-                    $sub = $price > 0 && $qty > 0 ? $price * $qty : 0;
-                    ?>
+            </thead>
+            <tbody>
+                <?php if (!$items): ?>
                     <tr>
-                        <td class="text-nowrap text-center"><?= $no++ ?></td>
-                        <td><?= esc($it['name']) ?>         <?php
-                                   if (esc($it['voltage']) === '-') {
-
-                                   } else
-                                       echo '(' . esc($it['voltage']) . 'V)' ?></td>
-                            <td class="text-center"><?= (int) $it['qty_order'] ?></td>
-                        <td class="text-center">
-                            <?= $price > 0 ? format_rupiah($price) : '<span class="text-muted">-</span>' ?>
-                        </td>
-                        <td class="text-center">
-                            <?= $sub > 0 ? format_rupiah($sub) : '<span class="text-muted">-</span>' ?>
-                        </td>
-                        <td class="text-center"><?= (int) $it['qty_done'] ?></td>
-                        <td class="text-center"><?= (int) $it['qty_shipped'] ?></td>
-                        <td class="text-center"> <?php
-                        if ($sisa === 0) {
-                            echo '<span class="badge bg-success">
-        0
-    </span>';
-                        } else {
-                            echo (int) $sisa;
-                        }
-
-                        ?></td>
+                        <td colspan="8" class="text-center text-muted">Belum ada item.</td>
                     </tr>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </tbody>
-    </table>
+                <?php else: ?>
+                    <?php
+                    $no = 1;
+                    foreach ($items as $it):
+                        $sisa = $it['qty_order'] - $it['qty_shipped'];
+                        $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
+                        $qty = (int) $it['qty_order'];
+                        $sub = $price > 0 && $qty > 0 ? $price * $qty : 0;
+                        ?>
+                        <tr>
+                            <td class="text-center"><?= $no++ ?></td>
+                            <td class="">
+                                <?= esc($it['name']) ?>
+                                <?php
+                                $volt = trim((string) $it['voltage']);
+                                if ($volt !== '' && $volt !== '-') {
+                                    echo ' (' . esc($volt) . 'V)';
+                                }
+                                ?>
+                            </td>
+                            <td class="text-center"><?= (int) $it['qty_order'] ?></td>
+                            <td class="text-center">
+                                <?= $price > 0 ? format_rupiah($price) : '<span class="text-muted">-</span>' ?>
+                            </td>
+                            <td class="text-center">
+                                <?= $sub > 0 ? format_rupiah($sub) : '<span class="text-muted">-</span>' ?>
+                            </td>
+                            <td class="text-center"><?= (int) $it['qty_done'] ?></td>
+                            <td class="text-center"><?= (int) $it['qty_shipped'] ?></td>
+                            <td class="text-center">
+                                <?php
+                                $sisaInt = (int) $sisa;
+                                if ($sisaInt === 0) {
+                                    echo '<span class="badge bg-success">0</span>';
+                                } else {
+                                    echo $sisaInt;
+                                }
+                                ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+
+    </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        if (window.jQuery && jQuery.fn.DataTable) {
+            jQuery('#itemsTable').DataTable({
+                searching: false,
+                info: false,
+                ordering: false,
+                columnDefs: [
+                    {
+                        className: 'dtr-control',
+                        orderable: false,
+                        targets: 0
+                    }
+                ],
+                responsive: {
+                    details: {
+                        type: 'column'
+                    }
+                },
+                language: {
+                    emptyTable: "Belum ada item.",
+                    lengthMenu: "Menampilkan _MENU_ data"
+                }
+            });
+
+
+        }
+    });
+
+</script>
 
 <?php if ($payments): ?>
     <h5>Pembayaran</h5>
-    <div class="card">
+    <div class="card  mb-4">
         <div class="card-body">
-
             <div class="table-responsive">
-                <table class="table table-sm table-striped mb-0">
+                <table class="table table-sm table-bordered mb-0">
                     <thead>
                         <tr>
-                            <th class="text-nowrap text-center">Tanggal</th>
+                            <th class="text-center">Tanggal</th>
                             <th class="text-nowrap text-center">Nominal</th>
                             <th class="text-nowrap text-center">Catatan</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($payments as $p): ?>
+                            <?php $date = strtotime($p['pay_date']); ?>
                             <tr>
-                                <td class="text-nowrap text-center" style="min-width: 160px;"><?= esc($p['pay_date']) ?></td>
+                                <td class="text text-center"><?= date('d-m-Y', $date) ?></td>
                                 <td class="text-nowrap text-center" style="min-width: 140px;">
                                     <?= format_rupiah((int) $p['amount']) ?>
                                 </td>
@@ -247,9 +285,7 @@ include __DIR__ . '/../partials/header.php';
 <?php if (!$shipments): ?>
     <p class="text-muted">Belum ada pengiriman.</p>
 <?php else: ?>
-    <?php
-
-    foreach ($shipments as $s): ?>
+    <?php foreach ($shipments as $s): ?>
         <div class="card mb-3">
             <div class="card-body">
                 <p class="mb-1"><strong>Tanggal Kirim:</strong> <?= esc($s['ship_date']) ?></p>
@@ -270,10 +306,12 @@ include __DIR__ . '/../partials/header.php';
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php $no = 1;
+                                <?php
+                                $no = 1;
                                 $qty_total = 0;
-                                foreach ($shipmentItems[$s['id']] as $si): ?>
-                                    <?php $qty_total += $si['qty']; ?>
+                                foreach ($shipmentItems[$s['id']] as $si):
+                                    $qty_total += $si['qty'];
+                                    ?>
                                     <tr>
                                         <td class="text-center align-middle"><?= $no++ ?></td>
                                         <td><?= esc($si['product_name']) ?></td>
@@ -295,6 +333,6 @@ include __DIR__ . '/../partials/header.php';
     <?php endforeach; ?>
 <?php endif; ?>
 
-<a href=" <?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Kembali</a>
+<a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Kembali</a>
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>
