@@ -205,8 +205,12 @@ include __DIR__ . '/../partials/header.php';
                                 $sisaInt = (int) $sisa;
                                 if ($sisaInt === 0) {
                                     echo '<span class="badge bg-success">0</span>';
+                                } else if ($sisaInt < $qty) {
+                                    ?> <span class="badge bg-warning"><?= $sisaInt; ?></span>
+                                    <?php
                                 } else {
-                                    echo $sisaInt;
+                                    ?> <span class="badge bg-danger"><?= $sisaInt; ?></span>
+                                    <?php
                                 }
                                 ?>
                             </td>
