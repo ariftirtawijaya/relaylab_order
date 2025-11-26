@@ -30,35 +30,41 @@ include __DIR__ . '/../partials/header.php';
     <a href="<?= base_url('reseller/order_new.php') ?>" class="btn btn-primary btn-sm">Buat Order Baru</a>
 </div>
 
-<table class="table table-sm table-striped align-middle">
-    <thead>
-        <tr>
-            <th>No</th>
-            <th>Tanggal</th>
-            <th>Total Qty</th>
-            <th>Status</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php $no = 1;
-        foreach ($orders as $o): ?>
-            <tr>
-                <td><?= $no++ ?></td>
-                <td><?= esc($o['order_date']) ?></td>
-                <td><?= (int) $o['total_qty'] ?> Item</td>
-                <td>
-                    <span class="badge bg-<?= badge_status($o['status']) ?>">
-                        <?= esc(format_status($o['status'])) ?>
-                    </span>
-                </td>
-                <td class="text-end">
-                    <a href="<?= base_url('reseller/order_view.php?id=' . $o['id']) ?>"
-                        class="btn btn-sm btn-outline-secondary">Detail</a>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-    </tbody>
-</table>
+<div class="card mb-4">
+    <div class="card-body">
+
+        <table class="table table-sm table-striped align-middle w-100">
+            <thead>
+                <tr>
+                    <th class="text-center align-middle">No</th>
+                    <th class="text-center align-middle">Tanggal</th>
+                    <th class="text-center align-middle">Total Qty</th>
+                    <th class="text-center align-middle">Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php $no = 1;
+                foreach ($orders as $o): ?>
+                    <?php $date = strtotime($o['order_date']); ?>
+                    <tr>
+                        <td class="text-center"><?= $no++ ?></td>
+                        <td class="text-center"><?= date('d-m-y', $date) ?></td>
+                        <td class="text-center"><?= (int) $o['total_qty'] ?> Item</td>
+                        <td class="text-center">
+                            <span class=" badge bg-<?= badge_status($o['status']) ?>">
+                                <?= addNewLine(format_status($o['status'])) ?>
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <a href="<?= base_url('reseller/order_view.php?id=' . $o['id']) ?>"
+                                class="btn btn-sm btn-outline-primary">Detail</a>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>

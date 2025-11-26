@@ -157,7 +157,7 @@ include __DIR__ . '/../partials/header.php';
             <thead>
                 <tr>
                     <th class="text-center">No</th>
-                    <th class="text-nowrap">Nama Produk</th>
+                    <th class="text-nowrap text-center">Nama Produk</th>
                     <th class="text-center align-middle">Qty Pesan</th>
                     <th class="text-center align-middle align-items-center">Harga / pcs</th>
                     <th class="text-center">Subtotal</th>
@@ -267,7 +267,7 @@ include __DIR__ . '/../partials/header.php';
                         <?php foreach ($payments as $p): ?>
                             <?php $date = strtotime($p['pay_date']); ?>
                             <tr>
-                                <td class="text text-center"><?= date('d-m-Y', $date) ?></td>
+                                <td class="text-center"><?= date('d-m-Y', $date) ?></td>
                                 <td class="text-nowrap text-center" style="min-width: 140px;">
                                     <?= format_rupiah((int) $p['amount']) ?>
                                 </td>

@@ -53,6 +53,13 @@ function format_status($status)
     return implode(' ', $parts);
 }
 
+function addNewLine($string)
+{
+    $parts = explode(' ', $string);
+    $parts = array_map('ucfirst', $parts);
+    return implode('<br>', $parts);
+}
+
 function generate_product_code(PDO $pdo): string
 {
     // Hitung berapa produk yang sudah ada
