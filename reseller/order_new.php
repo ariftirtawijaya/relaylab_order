@@ -133,7 +133,7 @@ include __DIR__ . '/../partials/header.php';
 
     <div class="mb-2">
         <button type="button" class="btn btn-sm btn-outline-primary" id="btnAddItem">
-            Tambah Produk
+            + Tambah Produk
         </button>
     </div>
 
@@ -143,7 +143,7 @@ include __DIR__ . '/../partials/header.php';
                 <tr>
                     <th style="width:50px;" class="text-center">No</th>
                     <th class="text-nowrap text-center" style="min-width:240px;">Produk</th>
-                    <th style="width:80px;" class="text-center">Qty</th>
+                    <th class="text-nowrap text-center" style="min-width:80px;" class="text-center">Qty</th>
                     <th class="text-nowrap text-center" style="min-width:120px;">Harga / pcs</th>
                     <th class="text-nowrap text-center" style="min-width:120px;">Subtotal</th>
                     <th style="width:60px;" class="text-center">Aksi</th>
@@ -176,7 +176,7 @@ include __DIR__ . '/../partials/header.php';
             <div class="mb-1">
                 <div class="form-check form-switch">
                     <input class="form-check-input custom-toggle" type="checkbox">
-                    <label class="form-check-label small">Produk custom</label>
+                    <label class="form-check-label small">Produk Custom</label>
                 </div>
                 <input type="hidden" name="mode[]" class="mode-input" value="normal">
             </div>
@@ -196,13 +196,14 @@ include __DIR__ . '/../partials/header.php';
                 placeholder="Nama produk custom">
         </td>
         <td class="align-bottom">
-            <input type="number" name="qty[]" class="form-control form-control-sm qty-input" min="1" value="1">
+            <input type="number" name="qty[]" class="form-control form-control-sm qty-input  text-center" min="1"
+                value="1">
         </td>
         <td class="text-nowrap align-bottom">
-            <input type="text" class="form-control form-control-sm price-display text-end" readonly>
+            <input type="text" class="form-control form-control-sm price-display  text-center" readonly>
         </td>
         <td class="text-nowrap align-bottom">
-            <input type="text" class="form-control form-control-sm subtotal-display text-end" readonly>
+            <input type="text" class="form-control form-control-sm subtotal-display  text-center" readonly>
         </td>
         <td class="text-center align-bottom">
             <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row">&times;</button>
