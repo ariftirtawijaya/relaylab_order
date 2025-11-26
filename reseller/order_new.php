@@ -7,11 +7,11 @@ require_once __DIR__ . '/../app/helpers.php';
 require_role('reseller');
 $user = current_user();
 
-// ambil semua produk aktif
+// ambil semua produk
 $stmt = $pdo->query("SELECT id, code, name, voltage, price FROM products ORDER BY name");
 $products = $stmt->fetchAll();
 
-// bikin map id -> harga untuk dipakai saat insert
+// map id -> harga (kalau nanti butuh)
 $productPrices = [];
 foreach ($products as $p) {
     $productPrices[$p['id']] = (int) $p['price'];
@@ -23,19 +23,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes_reseller = trim($_POST['notes_reseller'] ?? '');
 
     $product_ids = $_POST['product_id'] ?? [];
+    $custom_names = $_POST['custom_name'] ?? [];
     $qtys = $_POST['qty'] ?? [];
+    $modes = $_POST['mode'] ?? [];
 
     $items = [];
 
-    // filter baris yang valid
-    if (is_array($product_ids) && is_array($qtys)) {
-        for ($i = 0; $i < count($product_ids); $i++) {
-            $pid = (int) ($product_ids[$i] ?? 0);
+    if (is_array($qtys)) {
+        $count = count($qtys);
+        for ($i = 0; $i < $count; $i++) {
+            $mode = $modes[$i] ?? 'normal';
+            $pid = isset($product_ids[$i]) ? (int) $product_ids[$i] : 0;
+            $custom_name = isset($custom_names[$i]) ? trim($custom_names[$i]) : '';
             $qty = (int) ($qtys[$i] ?? 0);
 
-            if ($pid > 0 && $qty > 0) {
+            if ($qty <= 0) {
+                continue;
+            }
+
+            if ($mode === 'custom') {
+                if ($custom_name === '') {
+                    continue;
+                }
+                $items[] = [
+                    'product_id' => null,
+                    'custom_name' => $custom_name,
+                    'qty' => $qty,
+                ];
+            } else {
+                if ($pid <= 0) {
+                    continue;
+                }
                 $items[] = [
                     'product_id' => $pid,
+                    'custom_name' => null,
                     'qty' => $qty,
                 ];
             }
@@ -51,35 +72,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // buat kode order
             $orderCode = generate_order_code($pdo);
 
-            // insert ke tabel orders
+            // insert ke orders, sertakan created_by
             $stmt = $pdo->prepare("
-                INSERT INTO orders (code, reseller_id, order_date, status, notes_reseller)
-                VALUES (?, ?, NOW(), 'menunggu_konfirmasi', ?)
-            ");
-            $stmt->execute([$orderCode, $user['reseller_id'], $notes_reseller]);
+    INSERT INTO orders (code, reseller_id, order_date, status, notes_reseller, created_by)
+    VALUES (?, ?, NOW(), 'menunggu_konfirmasi', ?, ?)
+");
+            $stmt->execute([
+                $orderCode,
+                $user['reseller_id'],
+                $notes_reseller,
+                $user['id'],          // user yang sedang login (reseller)
+            ]);
             $orderId = $pdo->lastInsertId();
 
-            // insert item order
+
+            // insert item
             $stmtItem = $pdo->prepare("
-                INSERT INTO order_items (order_id, product_id, qty_order, qty_done, qty_shipped, note)
-                VALUES (?, ?, ?, 0, 0, '')
+                INSERT INTO order_items (order_id, product_id, custom_name, qty_order, qty_done, qty_shipped, note)
+                VALUES (?, ?, ?, ?, 0, 0, '')
             ");
 
             foreach ($items as $it) {
-                $pid = $it['product_id'];
-                $qty = $it['qty'];
-
-                // lepasin kalau product_id tidak dikenal (harusnya tidak terjadi)
-                if (!isset($productPrices[$pid])) {
-                    continue;
-                }
-
-                $stmtItem->execute([$orderId, $pid, $qty]);
+                $stmtItem->execute([
+                    $orderId,
+                    $it['product_id'],
+                    $it['custom_name'],
+                    $it['qty'],
+                ]);
             }
 
             $pdo->commit();
 
-            // redirect ke detail order setelah berhasil
             redirect('reseller/order_view.php?id=' . $orderId);
         } catch (Throwable $e) {
             $pdo->rollBack();
@@ -118,17 +141,16 @@ include __DIR__ . '/../partials/header.php';
         <table class="table table-sm table-striped align-middle" id="itemsTable">
             <thead>
                 <tr>
-                    <th style="width:50px;">No</th>
-                    <th class="text-nowrap">Produk</th>
-                    <th style="width:80px;">Qty</th>
-                    <th class="text-nowrap" style="min-width:120px;">Harga / pcs</th>
-                    <th class="text-nowrap" style="min-width:120px;">Subtotal</th>
-                    <th style="width:60px;"></th>
+                    <th style="width:50px;" class="text-center">No</th>
+                    <th class="text-nowrap text-center" style="min-width:240px;">Produk</th>
+                    <th style="width:80px;" class="text-center">Qty</th>
+                    <th class="text-nowrap text-center" style="min-width:120px;">Harga / pcs</th>
+                    <th class="text-nowrap text-center" style="min-width:120px;">Subtotal</th>
+                    <th style="width:60px;" class="text-center">Aksi</th>
                 </tr>
             </thead>
-
             <tbody>
-                <!-- baris item akan ditambahkan via JS -->
+                <!-- baris item akan ditambah via JS -->
             </tbody>
             <tfoot>
                 <tr>
@@ -146,11 +168,20 @@ include __DIR__ . '/../partials/header.php';
     <a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Batal</a>
 </form>
 
-<!-- Template baris item (dipakai JS) -->
+<!-- Template baris item -->
 <template id="rowTemplate">
     <tr>
-        <td class="align-middle no-col"></td>
+        <td class="align-middle no-col text-center"></td>
         <td>
+            <div class="mb-1">
+                <div class="form-check form-switch">
+                    <input class="form-check-input custom-toggle" type="checkbox">
+                    <label class="form-check-label small">Produk custom</label>
+                </div>
+                <input type="hidden" name="mode[]" class="mode-input" value="normal">
+            </div>
+
+            <!-- pilih dari daftar -->
             <select name="product_id[]" class="form-select form-select-sm product-select">
                 <option value="">Pilih produk...</option>
                 <?php foreach ($products as $p): ?>
@@ -159,23 +190,25 @@ include __DIR__ . '/../partials/header.php';
                     </option>
                 <?php endforeach; ?>
             </select>
+
+            <!-- produk custom -->
+            <input type="text" name="custom_name[]" class="form-control form-control-sm mt-1 custom-name-input d-none"
+                placeholder="Nama produk custom">
         </td>
-        <td>
-            <input type="number" name="qty[]" class="form-control form-control-sm qty-input text-center" min="1"
-                value="1">
+        <td class="align-bottom">
+            <input type="number" name="qty[]" class="form-control form-control-sm qty-input" min="1" value="1">
         </td>
-        <td class="text-nowrap">
-            <input type="text" class="form-control form-control-sm price-display text-center" readonly>
+        <td class="text-nowrap align-bottom">
+            <input type="text" class="form-control form-control-sm price-display text-end" readonly>
         </td>
-        <td class="text-nowrap">
-            <input type="text" class="form-control form-control-sm subtotal-display text-center" readonly>
+        <td class="text-nowrap align-bottom">
+            <input type="text" class="form-control form-control-sm subtotal-display text-end" readonly>
         </td>
-        <td class="text-center">
+        <td class="text-center align-bottom">
             <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row">&times;</button>
         </td>
     </tr>
 </template>
-
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -194,9 +227,7 @@ include __DIR__ . '/../partials/header.php';
             let no = 1;
             rows.forEach(row => {
                 const noCol = row.querySelector('.no-col');
-                if (noCol) {
-                    noCol.textContent = no++;
-                }
+                if (noCol) noCol.textContent = no++;
             });
         }
 
@@ -205,25 +236,38 @@ include __DIR__ . '/../partials/header.php';
             const qtyInput = row.querySelector('.qty-input');
             const priceEl = row.querySelector('.price-display');
             const subEl = row.querySelector('.subtotal-display');
+            const mode = row.querySelector('.mode-input').value;
 
-            const option = select.options[select.selectedIndex];
-            const price = option && option.dataset.price ? parseInt(option.dataset.price, 10) : 0;
+            let price = 0;
+            if (mode === 'normal') {
+                const option = select.options[select.selectedIndex];
+                price = option && option.dataset.price ? parseInt(option.dataset.price, 10) : 0;
+            }
+
             const qty = qtyInput.value ? parseInt(qtyInput.value, 10) : 0;
-
             const subtotal = price * qty;
 
-            priceEl.value = price > 0 ? formatRupiah(price) : '';
-            subEl.value = subtotal > 0 ? formatRupiah(subtotal) : '';
+            if (mode === 'normal') {
+                priceEl.value = price > 0 ? formatRupiah(price) : '';
+                subEl.value = subtotal > 0 ? formatRupiah(subtotal) : '';
+            } else {
+                priceEl.value = '—';
+                subEl.value = '—';
+            }
         }
 
         function recalcGrandTotal() {
             let total = 0;
             itemsTableBody.querySelectorAll('tr').forEach(row => {
+                const mode = row.querySelector('.mode-input').value;
+                if (mode !== 'normal') return; // produk custom: belum ada harga, skip total
+
                 const select = row.querySelector('.product-select');
                 const qtyInput = row.querySelector('.qty-input');
                 const option = select.options[select.selectedIndex];
                 const price = option && option.dataset.price ? parseInt(option.dataset.price, 10) : 0;
                 const qty = qtyInput.value ? parseInt(qtyInput.value, 10) : 0;
+
                 total += price * qty;
             });
             grandTotalEl.textContent = formatRupiah(total);
@@ -234,7 +278,7 @@ include __DIR__ . '/../partials/header.php';
                 theme: 'bootstrap-5',
                 width: '100%',
                 placeholder: 'Pilih produk...',
-                allowClear: false,
+                // allowClear: true, // bisa diaktifkan kalau mau ada tombol x di dalam select
                 dropdownParent: $('#orderItemsWrapper')
             });
         }
@@ -247,17 +291,19 @@ include __DIR__ . '/../partials/header.php';
             const select = newRow.querySelector('.product-select');
             const qtyInput = newRow.querySelector('.qty-input');
             const btnDel = newRow.querySelector('.btn-remove-row');
+            const modeInput = newRow.querySelector('.mode-input');
+            const customToggle = newRow.querySelector('.custom-toggle');
+            const customInput = newRow.querySelector('.custom-name-input');
 
             // aktifkan select2
             initSelect2For(select);
 
-            // pakai jQuery untuk event change di select2
+            // event change untuk select2
             $(select).on('change', function () {
                 recalcRow(newRow);
                 recalcGrandTotal();
             });
 
-            // qty pakai event input biasa
             qtyInput.addEventListener('input', function () {
                 recalcRow(newRow);
                 recalcGrandTotal();
@@ -269,14 +315,47 @@ include __DIR__ . '/../partials/header.php';
                 recalcGrandTotal();
             });
 
+            // toggle produk custom
+            customToggle.addEventListener('change', function () {
+                if (customToggle.checked) {
+                    // mode custom
+                    modeInput.value = 'custom';
+
+                    // kosongkan dan disable select2
+                    $(select).val(null).trigger('change');
+                    $(select).prop('disabled', true);
+
+                    // tampilkan input custom
+                    customInput.classList.remove('d-none');
+                    customInput.focus();
+
+                    // harga & subtotal jadi tanda strip
+                    newRow.querySelector('.price-display').value = '—';
+                    newRow.querySelector('.subtotal-display').value = '—';
+                    recalcGrandTotal();
+                } else {
+                    // kembali ke mode normal
+                    modeInput.value = 'normal';
+
+                    $(select).prop('disabled', false);
+
+                    customInput.classList.add('d-none');
+                    customInput.value = '';
+
+                    recalcRow(newRow);
+                    recalcGrandTotal();
+                }
+            });
+
             renumberRows();
+            recalcRow(newRow);
+            recalcGrandTotal();
         }
 
-
-        // Tambah 1 baris default saat halaman dibuka
+        // tambah 1 baris default saat halaman dibuka
         addRow();
 
-        // Tambah baris baru saat klik tombol
+        // tombol tambah produk
         btnAddItem.addEventListener('click', function () {
             addRow();
         });

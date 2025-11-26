@@ -6,8 +6,44 @@ require_once __DIR__ . '/../app/helpers.php';
 require_role('admin');
 
 $id = (int) ($_GET['id'] ?? 0);
+if ($id <= 0) {
+    die("Order tidak valid");
+}
 
-// handle update status order
+// ====== HANDLE: mapping item custom -> produk resmi (FITUR BARU) ======
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['link_item'])) {
+    $order_item_id = (int) ($_POST['order_item_id'] ?? 0);
+    $product_id = (int) ($_POST['product_id'] ?? 0);
+
+    if ($order_item_id > 0 && $product_id > 0) {
+        // Pastikan item ini milik order yang sedang dibuka
+        $stmt = $pdo->prepare("SELECT id FROM order_items WHERE id = ? AND order_id = ?");
+        $stmt->execute([$order_item_id, $id]);
+        $oi = $stmt->fetch();
+
+        if ($oi) {
+            // Pastikan produk ada
+            $stmt = $pdo->prepare("SELECT id FROM products WHERE id = ?");
+            $stmt->execute([$product_id]);
+            $prod = $stmt->fetch();
+
+            if ($prod) {
+                // Update: set product_id, kosongkan custom_name
+                $stmt = $pdo->prepare("
+                    UPDATE order_items
+                    SET product_id = ?, custom_name = NULL
+                    WHERE id = ?
+                ");
+                $stmt->execute([$product_id, $order_item_id]);
+            }
+        }
+    }
+
+    // Apapun hasilnya, balik lagi ke halaman ini
+    redirect('admin/order_view.php?id=' . $id);
+}
+
+// ====== HANDLE LAMA: update status order (TETAP) ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $status = $_POST['status'] ?? 'menunggu_konfirmasi';
     if (!in_array($status, ['menunggu_konfirmasi', 'diproses', 'selesai'], true)) {
@@ -18,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     redirect('admin/order_view.php?id=' . $id);
 }
 
-// handle update qty_done
+// ====== HANDLE LAMA: update qty_done (progress produksi) ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_progress'])) {
     $qty_done = $_POST['qty_done'] ?? [];
     foreach ($qty_done as $itemId => $val) {
@@ -39,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_progress'])) {
     redirect('admin/order_view.php?id=' . $id);
 }
 
-// handle tambah pengiriman
+// ====== HANDLE LAMA: tambah pengiriman ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     $courier = trim($_POST['courier'] ?? '');
     $tracking = trim($_POST['tracking_number'] ?? '');
@@ -87,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
                 $stmtUpdateShipped->execute([$newShipped, $itemId]);
             }
 
-            // auto: kalau semua sudah shipped, boleh bantu set status ke 'selesai' (opsional)
+            // auto: kalau semua sudah shipped, set status ke 'selesai'
             $check = $pdo->prepare("SELECT COUNT(*) c FROM order_items WHERE order_id = ? AND qty_shipped < qty_order");
             $check->execute([$id]);
             $remain = $check->fetch()['c'];
@@ -104,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     }
 }
 
-// ambil order + items + shipments
+// ====== AMBIL DATA ORDER (LAMA, TETAP) ======
 $stmt = $pdo->prepare("SELECT o.*, r.name AS reseller_name
   FROM orders o
   JOIN resellers r ON r.id = o.reseller_id
@@ -115,13 +151,25 @@ if (!$order) {
     die("Order tidak ditemukan");
 }
 
-$stmt = $pdo->prepare("SELECT oi.*, p.code, p.name
-  FROM order_items oi
-  JOIN products p ON p.id = oi.product_id
-  WHERE oi.order_id = ?");
+// ====== AMBIL ITEM ORDER (DIUBAH UNTUK DUKUNG CUSTOM) ======
+$stmt = $pdo->prepare("
+    SELECT 
+        oi.*,
+        p.code,
+        COALESCE(oi.custom_name, p.name) AS name,
+        oi.custom_name AS raw_custom_name
+    FROM order_items oi
+    LEFT JOIN products p ON p.id = oi.product_id
+    WHERE oi.order_id = ?
+");
 $stmt->execute([$id]);
 $items = $stmt->fetchAll();
 
+// ====== AMBIL SEMUA PRODUK UNTUK DROPDOWN MAPPING CUSTOM (BARU) ======
+$stmt = $pdo->query("SELECT id, name, voltage FROM products ORDER BY name");
+$allProducts = $stmt->fetchAll();
+
+// ====== AMBIL PENGIRIMAN (LAMA) ======
 $stmt = $pdo->prepare("SELECT * FROM shipments WHERE order_id = ? ORDER BY ship_date");
 $stmt->execute([$id]);
 $shipments = $stmt->fetchAll();
@@ -131,10 +179,11 @@ if ($shipments) {
     $shipmentIds = array_column($shipments, 'id');
     $in = implode(',', array_fill(0, count($shipmentIds), '?'));
     $stmt = $pdo->prepare(
-        "SELECT si.*, oi.product_id, p.name AS product_name
+        "SELECT si.*, oi.product_id,
+                COALESCE(oi.custom_name, p.name) AS product_name
          FROM shipment_items si
          JOIN order_items oi ON oi.id = si.order_item_id
-         JOIN products p ON p.id = oi.product_id
+         LEFT JOIN products p ON p.id = oi.product_id
          WHERE si.shipment_id IN ($in)"
     );
     $stmt->execute($shipmentIds);
@@ -165,8 +214,7 @@ include __DIR__ . '/../partials/header.php';
                     </div>
                     <div class="col-auto">
                         <select name="status" class="form-select form-select-sm">
-                            <option value="menunggu_konfirmasi" <?= $order['status'] == 'menunggu_konfirmasi' ? 'selected' : ''; ?>>Menunggu Konfirmasi
-                            </option>
+                            <option value="menunggu_konfirmasi" <?= $order['status'] == 'menunggu_konfirmasi' ? 'selected' : ''; ?>>Menunggu Konfirmasi</option>
                             <option value="diproses" <?= $order['status'] == 'diproses' ? 'selected' : ''; ?>>Diproses
                             </option>
                             <option value="selesai" <?= $order['status'] == 'selesai' ? 'selected' : ''; ?>>Selesai
@@ -199,16 +247,24 @@ include __DIR__ . '/../partials/header.php';
                     <th>Selesai (qty_done)</th>
                     <th>Sudah Dikirim</th>
                     <th>Sisa Kirim</th>
+                    <th>Custom / Mapping</th> <!-- KOLOM BARU -->
                 </tr>
             </thead>
             <tbody>
                 <?php $no = 1;
                 foreach ($items as $it):
                     $sisa = $it['qty_order'] - $it['qty_shipped'];
+                    $isCustom = ($it['product_id'] === null);
                     ?>
-                    <tr>
+                    <tr class="<?= $isCustom ? 'table-warning' : '' ?>">
                         <td><?= $no++ ?></td>
-                        <td><?= esc($it['name']) ?></td>
+                        <td>
+                            <?= esc($it['name']) ?>
+                            <?php if ($isCustom && $it['raw_custom_name']): ?>
+                                <br>
+                                <span class="badge bg-warning text-dark">Custom: butuh mapping</span>
+                            <?php endif; ?>
+                        </td>
                         <td><?= (int) $it['qty_order'] ?></td>
                         <td style="max-width:80px;">
                             <input type="number" name="qty_done[<?= $it['id'] ?>]" min="0"
@@ -217,6 +273,25 @@ include __DIR__ . '/../partials/header.php';
                         </td>
                         <td><?= (int) $it['qty_shipped'] ?></td>
                         <td><?= (int) $sisa ?></td>
+                        <td style="min-width:200px;">
+                            <?php if ($isCustom): ?>
+                                <form method="post" class="d-flex gap-1">
+                                    <input type="hidden" name="link_item" value="1">
+                                    <input type="hidden" name="order_item_id" value="<?= (int) $it['id'] ?>">
+                                    <select name="product_id" class="form-select form-select-sm" required>
+                                        <option value="">Pilih produk...</option>
+                                        <?php foreach ($allProducts as $p): ?>
+                                            <option value="<?= $p['id'] ?>">
+                                                <?= esc($p['name']) ?> (<?= esc($p['voltage']) ?>V)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-primary">Link</button>
+                                </form>
+                            <?php else: ?>
+                                <span class="badge bg-success">Normal</span>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

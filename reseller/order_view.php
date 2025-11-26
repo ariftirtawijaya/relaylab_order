@@ -8,10 +8,13 @@ $user = current_user();
 
 $id = (int) ($_GET['id'] ?? 0);
 
-$stmt = $pdo->prepare("SELECT o.*, r.name AS reseller_name
-  FROM orders o
-  JOIN resellers r ON r.id = o.reseller_id
-  WHERE o.id = ? AND o.reseller_id = ?");
+// Ambil data order milik reseller yang sedang login
+$stmt = $pdo->prepare("
+    SELECT o.*, r.name AS reseller_name
+    FROM orders o
+    JOIN resellers r ON r.id = o.reseller_id
+    WHERE o.id = ? AND o.reseller_id = ?
+");
 $stmt->execute([$id, $user['reseller_id']]);
 $order = $stmt->fetch();
 
@@ -19,30 +22,44 @@ if (!$order) {
     die("Order tidak ditemukan");
 }
 
-$stmt = $pdo->prepare("SELECT oi.*, p.code, p.name
-  FROM order_items oi
-  JOIN products p ON p.id = oi.product_id
-  WHERE oi.order_id = ?");
+// Ambil item order, dukung produk custom
+$stmt = $pdo->prepare("
+    SELECT 
+        oi.*,
+        p.code,
+        COALESCE(oi.custom_name, p.name) AS name
+    FROM order_items oi
+    LEFT JOIN products p ON p.id = oi.product_id
+    WHERE oi.order_id = ?
+");
 $stmt->execute([$id]);
 $items = $stmt->fetchAll();
 
-// pengiriman
+// Ambil data pengiriman
 $stmt = $pdo->prepare("SELECT * FROM shipments WHERE order_id = ? ORDER BY ship_date");
 $stmt->execute([$id]);
 $shipments = $stmt->fetchAll();
 
+// Ambil item per pengiriman (jika ada)
 $shipmentItems = [];
 if ($shipments) {
     $shipmentIds = array_column($shipments, 'id');
-    $in = implode(',', array_fill(0, count($shipmentIds), '?'));
-    $stmt = $pdo->prepare(
-        "SELECT si.*, oi.product_id, p.name AS product_name
-         FROM shipment_items si
-         JOIN order_items oi ON oi.id = si.order_item_id
-         JOIN products p ON p.id = oi.product_id
-         WHERE si.shipment_id IN ($in)"
-    );
+    $placeholders = implode(',', array_fill(0, count($shipmentIds), '?'));
+
+    $sql = "
+        SELECT 
+            si.*,
+            oi.product_id,
+            COALESCE(oi.custom_name, p.name) AS product_name
+        FROM shipment_items si
+        JOIN order_items oi ON oi.id = si.order_item_id
+        LEFT JOIN products p ON p.id = oi.product_id
+        WHERE si.shipment_id IN ($placeholders)
+    ";
+
+    $stmt = $pdo->prepare($sql);
     $stmt->execute($shipmentIds);
+
     foreach ($stmt->fetchAll() as $row) {
         $shipmentItems[$row['shipment_id']][] = $row;
     }
@@ -56,9 +73,7 @@ include __DIR__ . '/../partials/header.php';
     <span class="badge bg-<?= badge_status($order['status']) ?>">
         <?= esc(format_status($order['status'])) ?>
     </span>
-
 </div>
-
 
 <div class="card mb-4">
     <div class="card-body">
@@ -75,7 +90,7 @@ include __DIR__ . '/../partials/header.php';
 
 <h5>Item Order</h5>
 <div class="table-responsive mb-4">
-    <table id="orderItemsTable" class="table table-sm table-striped align-middle nowrap" style="width:100%;">
+    <table class="table table-sm table-striped align-middle">
         <thead>
             <tr>
                 <th>No</th>
@@ -87,23 +102,28 @@ include __DIR__ . '/../partials/header.php';
             </tr>
         </thead>
         <tbody>
-            <?php $no = 1;
-            foreach ($items as $it):
-                $sisa = $it['qty_order'] - $it['qty_shipped'];
-                ?>
+            <?php if (!$items): ?>
                 <tr>
-                    <td><?= $no++ ?></td>
-                    <td><?= esc($it['name']) ?></td>
-                    <td><?= (int) $it['qty_order'] ?></td>
-                    <td><?= (int) $it['qty_done'] ?></td>
-                    <td><?= (int) $it['qty_shipped'] ?></td>
-                    <td><?= (int) $sisa ?></td>
+                    <td colspan="6" class="text-center text-muted">Belum ada item.</td>
                 </tr>
-            <?php endforeach; ?>
+            <?php else: ?>
+                <?php $no = 1;
+                foreach ($items as $it):
+                    $sisa = $it['qty_order'] - $it['qty_shipped'];
+                    ?>
+                    <tr>
+                        <td><?= $no++ ?></td>
+                        <td><?= esc($it['name']) ?></td>
+                        <td><?= (int) $it['qty_order'] ?></td>
+                        <td><?= (int) $it['qty_done'] ?></td>
+                        <td><?= (int) $it['qty_shipped'] ?></td>
+                        <td><?= (int) $sisa ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
         </tbody>
     </table>
 </div>
-
 
 <h5>Pengiriman</h5>
 <?php if (!$shipments): ?>
@@ -118,6 +138,7 @@ include __DIR__ . '/../partials/header.php';
                 <?php if ($s['notes']): ?>
                     <p class="mb-2"><strong>Catatan:</strong> <?= nl2br(esc($s['notes'])) ?></p>
                 <?php endif; ?>
+
                 <?php if (!empty($shipmentItems[$s['id']])): ?>
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered mb-0">
@@ -144,22 +165,5 @@ include __DIR__ . '/../partials/header.php';
 <?php endif; ?>
 
 <a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Kembali</a>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
-        $('#orderItemsTable').DataTable({
-            responsive: true,
-            paging: false,     // tidak perlu halaman, semua tampil
-            searching: false,  // tidak perlu kotak search
-            info: false,       // sembunyikan "Showing 1 to ..."
-            ordering: false,   // kalau mau urutan fix dari server
-            scrollX: true,     // kalau kolom banyak / nama panjang, bisa geser horizontal
-            language: {
-                emptyTable: "Tidak ada data item order",
-            }
-        });
-    });
-</script>
-
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>
