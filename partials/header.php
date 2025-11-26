@@ -61,6 +61,8 @@ $user = current_user();
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/resellers.php') ?>">Reseller</a>
                             </li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/orders.php') ?>">Order</a></li>
+                            <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/order_new.php') ?>">Buat
+                                    Order</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/users.php') ?>">User Login</a>
                             </li>
                         <?php else: ?>

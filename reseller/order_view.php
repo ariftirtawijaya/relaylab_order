@@ -214,26 +214,32 @@ include __DIR__ . '/../partials/header.php';
 
 <?php if ($payments): ?>
     <h5>Pembayaran</h5>
-    <div class="table-responsive mb-4">
-        <table class="table table-sm table-striped align-middle">
-            <thead>
-                <tr>
-                    <th class="text-nowrap text-center">Tanggal</th>
-                    <th class="text-nowrap text-center">Nominal</th>
-                    <th class="text-nowrap text-center">Catatan</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($payments as $p): ?>
-                    <tr>
-                        <td class="text-nowrap text-center" style="min-width: 160px;"><?= esc($p['pay_date']) ?></td>
-                        <td class="text-nowrap text-center" style="min-width: 140px;"><?= format_rupiah((int) $p['amount']) ?>
-                        </td>
-                        <td class="text-nowrap text-center"><?= esc($p['notes']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+    <div class="card">
+        <div class="card-body">
+
+            <div class="table-responsive">
+                <table class="table table-sm table-striped mb-0">
+                    <thead>
+                        <tr>
+                            <th class="text-nowrap text-center">Tanggal</th>
+                            <th class="text-nowrap text-center">Nominal</th>
+                            <th class="text-nowrap text-center">Catatan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($payments as $p): ?>
+                            <tr>
+                                <td class="text-nowrap text-center" style="min-width: 160px;"><?= esc($p['pay_date']) ?></td>
+                                <td class="text-nowrap text-center" style="min-width: 140px;">
+                                    <?= format_rupiah((int) $p['amount']) ?>
+                                </td>
+                                <td class="text-nowrap text-center"><?= esc($p['notes']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 <?php endif; ?>
 
@@ -241,7 +247,9 @@ include __DIR__ . '/../partials/header.php';
 <?php if (!$shipments): ?>
     <p class="text-muted">Belum ada pengiriman.</p>
 <?php else: ?>
-    <?php foreach ($shipments as $s): ?>
+    <?php
+
+    foreach ($shipments as $s): ?>
         <div class="card mb-3">
             <div class="card-body">
                 <p class="mb-1"><strong>Tanggal Kirim:</strong> <?= esc($s['ship_date']) ?></p>
@@ -256,18 +264,29 @@ include __DIR__ . '/../partials/header.php';
                         <table class="table table-sm table-bordered mb-0">
                             <thead>
                                 <tr>
+                                    <th class="text-nowrap text-center align-middle" style="width: 36px;">No</th>
                                     <th class="text-nowrap text-center align-middle">Produk</th>
                                     <th class="text-center align-middle">Qty Kirim</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($shipmentItems[$s['id']] as $si): ?>
+                                <?php $no = 1;
+                                $qty_total = 0;
+                                foreach ($shipmentItems[$s['id']] as $si): ?>
+                                    <?php $qty_total += $si['qty']; ?>
                                     <tr>
+                                        <td class="text-center align-middle"><?= $no++ ?></td>
                                         <td><?= esc($si['product_name']) ?></td>
                                         <td class="text-center align-middle"><?= (int) $si['qty'] ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td class="text-center align-middle" colspan="2"><strong>Total Qty</strong></td>
+                                    <td class="text-center align-middle"><strong><?= $qty_total ?></strong></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 <?php endif; ?>

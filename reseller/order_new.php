@@ -120,7 +120,7 @@ include __DIR__ . '/../partials/header.php';
     <div class="alert alert-danger"><?= esc($error) ?></div>
 <?php endif; ?>
 
-<form method="post" id="orderForm" class="card card-body border-0 shadow-sm mb-4">
+<form method="post" id="orderForm">
     <div class="mb-3">
         <label class="form-label">Catatan untuk Admin (opsional)</label>
         <textarea name="notes_reseller" rows="3"
