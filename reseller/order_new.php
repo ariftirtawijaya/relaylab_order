@@ -7,15 +7,16 @@ require_once __DIR__ . '/../app/helpers.php';
 require_role('reseller');
 $user = current_user();
 
-// ambil semua produk
-$stmt = $pdo->query("SELECT id, code, name, voltage, price FROM products ORDER BY name");
-$products = $stmt->fetchAll();
-
-// map id -> harga (kalau nanti butuh)
-$productPrices = [];
-foreach ($products as $p) {
-    $productPrices[$p['id']] = (int) $p['price'];
+if (!function_exists('format_rupiah')) {
+    function format_rupiah(int $v): string
+    {
+        return 'Rp ' . number_format($v, 0, ',', '.');
+    }
 }
+
+// Ambil semua produk aktif
+$stmt = $pdo->query("SELECT id, name, voltage, price FROM products WHERE is_active = 1 ORDER BY name");
+$products = $stmt->fetchAll();
 
 $error = '';
 
@@ -25,38 +26,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $product_ids = $_POST['product_id'] ?? [];
     $custom_names = $_POST['custom_name'] ?? [];
     $qtys = $_POST['qty'] ?? [];
-    $modes = $_POST['mode'] ?? [];
 
     $items = [];
 
     if (is_array($qtys)) {
         $count = count($qtys);
         for ($i = 0; $i < $count; $i++) {
-            $mode = $modes[$i] ?? 'normal';
             $pid = isset($product_ids[$i]) ? (int) $product_ids[$i] : 0;
-            $custom_name = isset($custom_names[$i]) ? trim($custom_names[$i]) : '';
+            $cname = isset($custom_names[$i]) ? trim($custom_names[$i]) : '';
             $qty = (int) ($qtys[$i] ?? 0);
 
             if ($qty <= 0) {
                 continue;
             }
 
-            if ($mode === 'custom') {
-                if ($custom_name === '') {
-                    continue;
-                }
-                $items[] = [
-                    'product_id' => null,
-                    'custom_name' => $custom_name,
-                    'qty' => $qty,
-                ];
-            } else {
-                if ($pid <= 0) {
-                    continue;
-                }
+            if ($pid > 0) {
+                // produk normal
                 $items[] = [
                     'product_id' => $pid,
                     'custom_name' => null,
+                    'qty' => $qty,
+                ];
+            } elseif ($cname !== '') {
+                // produk custom
+                $items[] = [
+                    'product_id' => null,
+                    'custom_name' => $cname,
                     'qty' => $qty,
                 ];
             }
@@ -64,29 +59,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($items)) {
-        $error = "Minimal harus ada 1 produk yang dipilih.";
+        $error = "Minimal harus ada 1 produk di keranjang.";
     } else {
         try {
             $pdo->beginTransaction();
 
-            // buat kode order
+            // generate kode order (fungsi generate_order_code sudah ada di helpers)
             $orderCode = generate_order_code($pdo);
 
-            // insert ke orders, sertakan created_by
+            // insert ke orders (struktur mengikuti sistem yang sudah berjalan)
             $stmt = $pdo->prepare("
-    INSERT INTO orders (code, reseller_id, order_date, status, notes_reseller, created_by)
-    VALUES (?, ?, NOW(), 'menunggu_konfirmasi', ?, ?)
-");
+                INSERT INTO orders (code, reseller_id, order_date, status, notes_reseller, created_by)
+                VALUES (?, ?, NOW(), 'menunggu_konfirmasi', ?, ?)
+            ");
             $stmt->execute([
                 $orderCode,
                 $user['reseller_id'],
                 $notes_reseller,
-                $user['id'],          // user yang sedang login (reseller)
+                $user['id'],
             ]);
             $orderId = $pdo->lastInsertId();
 
-
-            // insert item
+            // insert item order
             $stmtItem = $pdo->prepare("
                 INSERT INTO order_items (order_id, product_id, custom_name, qty_order, qty_done, qty_shipped, note)
                 VALUES (?, ?, ?, ?, 0, 0, '')
@@ -117,250 +111,403 @@ include __DIR__ . '/../partials/header.php';
 <h3 class="mb-3">Buat Order Baru</h3>
 
 <?php if ($error): ?>
-    <div class="alert alert-danger"><?= esc($error) ?></div>
+        <div class="alert alert-danger"><?= esc($error) ?></div>
 <?php endif; ?>
 
 <form method="post" id="orderForm">
     <div class="mb-3">
         <label class="form-label">Catatan untuk Admin (opsional)</label>
         <textarea name="notes_reseller" rows="3"
-            class="form-control"><?= esc($_POST['notes_reseller'] ?? '') ?></textarea>
+                  class="form-control"><?= esc($_POST['notes_reseller'] ?? '') ?></textarea>
     </div>
 
     <hr>
 
-    <h5 class="mb-3">Item Produk</h5>
-
-    <div class="mb-2">
-        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAddItem">
-            + Tambah Produk
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h5 class="mb-0">Pilih Produk</h5>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAddCustom">
+            + Tambah Produk Custom
         </button>
     </div>
 
-    <div id="orderItemsWrapper" class="table-responsive mb-3">
-        <table class="table table-sm table-striped align-middle" id="itemsTable">
-            <thead>
-                <tr>
-                    <th style="width:50px;" class="text-center">No</th>
-                    <th class="text-nowrap text-center" style="min-width:240px;">Produk</th>
-                    <th class="text-nowrap text-center" style="min-width:80px;" class="text-center">Qty</th>
-                    <th class="text-nowrap text-center" style="min-width:120px;">Harga / pcs</th>
-                    <th class="text-nowrap text-center" style="min-width:120px;">Subtotal</th>
-                    <th style="width:60px;" class="text-center">Aksi</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- baris item akan ditambah via JS -->
-            </tbody>
-            <tfoot>
-                <tr>
-                    <th colspan="4" class="text-end">Total</th>
-                    <th>
-                        <span id="grandTotalDisplay">Rp 0</span>
-                    </th>
-                    <th></th>
-                </tr>
-            </tfoot>
-        </table>
+    <div class="mb-3">
+        <input type="text" id="productSearch" class="form-control form-control-sm"
+               placeholder="Cari produk, contoh: headlamp foglamp aod 12v">
     </div>
 
-    <button type="submit" class="btn btn-primary">Simpan Order</button>
-    <a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Batal</a>
-</form>
-
-<!-- Template baris item -->
-<template id="rowTemplate">
-    <tr>
-        <td class="align-middle no-col text-center"></td>
-        <td>
-            <div class="mb-1">
-                <div class="form-check form-switch">
-                    <input class="form-check-input custom-toggle" type="checkbox">
-                    <label class="form-check-label small">Produk Custom</label>
+    <!-- GRID PRODUK -->
+    <div class="row g-2 mb-4" id="productList">
+        <?php foreach ($products as $p): ?>
+                <?php
+                $pid = (int) $p['id'];
+                $name = $p['name'];
+                $voltage = trim((string) $p['voltage']);
+                $price = (int) $p['price'];
+                $searchText = strtolower($name . ' ' . $voltage);
+                ?>
+                <div class="col-12 col-sm-6 col-md-4 col-lg-3">
+                    <div class="card h-100 product-card"
+                         data-id="<?= $pid ?>"
+                         data-name="<?= esc($name) ?>"
+                         data-voltage="<?= esc($voltage) ?>"
+                         data-price="<?= $price ?>"
+                         data-search="<?= esc($searchText) ?>">
+                        <div class="card-body d-flex flex-column">
+                            <div class="mb-1">
+                                <div class="fw-semibold small"><?= esc($name) ?></div>
+                                <?php if ($voltage !== '' && $voltage !== '-'): ?>
+                                        <div class="text-muted small">Voltase: <?= esc($voltage) ?>V</div>
+                                <?php endif; ?>
+                            </div>
+                            <div class="mt-auto d-flex justify-content-between align-items-center">
+                                <div class="fw-bold small"><?= format_rupiah($price) ?></div>
+                                <button type="button"
+                                        class="btn btn-sm btn-primary btn-add-product">
+                                    Tambah
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <input type="hidden" name="mode[]" class="mode-input" value="normal">
+        <?php endforeach; ?>
+
+        <?php if (!$products): ?>
+                <div class="col-12">
+                    <p class="text-muted">Belum ada produk terdaftar.</p>
+                </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- KERANJANG (CARD LIST, BUKAN TABEL) -->
+    <h5>Keranjang</h5>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div id="cartList">
+                <!-- item keranjang akan ditambahkan via JS sebagai .cart-item -->
             </div>
 
-            <!-- pilih dari daftar -->
-            <select name="product_id[]" class="form-select form-select-sm product-select">
-                <option value="">Pilih produk...</option>
-                <?php foreach ($products as $p): ?>
-                    <option value="<?= $p['id'] ?>" data-price="<?= (int) $p['price'] ?>">
-                        <?= esc($p['name']) ?> (<?= esc($p['voltage']) ?>V)
-                    </option>
-                <?php endforeach; ?>
-            </select>
+            <hr class="my-3">
 
-            <!-- produk custom -->
-            <input type="text" name="custom_name[]" class="form-control form-control-sm mt-1 custom-name-input d-none"
-                placeholder="Nama produk custom">
-        </td>
-        <td class="align-bottom">
-            <input type="number" name="qty[]" class="form-control form-control-sm qty-input  text-center" min="1"
-                value="1">
-        </td>
-        <td class="text-nowrap align-bottom">
-            <input type="text" class="form-control form-control-sm price-display  text-center" readonly>
-        </td>
-        <td class="text-nowrap align-bottom">
-            <input type="text" class="form-control form-control-sm subtotal-display  text-center" readonly>
-        </td>
-        <td class="text-center align-bottom">
-            <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row">&times;</button>
-        </td>
-    </tr>
-</template>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <div class="small text-muted">
+                    Total hanya menghitung produk dengan harga. Produk custom akan dinilai admin.
+                </div>
+                <div class="fw-semibold">
+                    Total: <span id="grandTotalDisplay">Rp 0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BAR BAWAH TOTAL (ikut submit) -->
+    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
+        <div class="fw-semibold">
+            Total Tagihan Sementara:
+            <span id="grandTotalDisplayBar">Rp 0</span>
+            <span class="text-muted small">(produk custom belum dihitung)</span>
+        </div>
+        <div class="text-sm-end">
+            <button type="submit" class="btn btn-primary">Simpan Order</button>
+            <a href="<?= base_url('reseller/orders.php') ?>" class="btn btn-secondary">Batal</a>
+        </div>
+    </div>
+</form>
+
+<!-- MODAL PRODUK CUSTOM -->
+<div class="modal fade" id="customProductModal" tabindex="-1" aria-labelledby="customProductLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="customProductLabel">Tambah Produk Custom</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Nama Produk Custom</label>
+                    <input type="text" class="form-control" id="customNameInput"
+                           placeholder="Contoh: Relay Set Custom HR-V Facelift">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Qty</label>
+                    <input type="number" class="form-control" id="customQtyInput"
+                           value="1" min="1">
+                </div>
+                <p class="text-muted small mb-0">
+                    Harga untuk produk custom akan ditentukan admin setelah order dibuat.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnSaveCustom">Tambah ke Keranjang</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const itemsTableBody = document.querySelector('#itemsTable tbody');
-        const rowTemplate = document.querySelector('#rowTemplate');
-        const grandTotalEl = document.getElementById('grandTotalDisplay');
-        const btnAddItem = document.getElementById('btnAddItem');
+document.addEventListener('DOMContentLoaded', function () {
+    const cartList           = document.getElementById('cartList');
+    const grandTotalEl       = document.getElementById('grandTotalDisplay');
+    const grandTotalBarEl    = document.getElementById('grandTotalDisplayBar');
+    const productSearchInput = document.getElementById('productSearch');
+    const productCards       = document.querySelectorAll('.product-card');
+    const btnAddCustom       = document.getElementById('btnAddCustom');
 
-        function formatRupiah(angka) {
-            if (isNaN(angka) || angka <= 0) return 'Rp 0';
-            return 'Rp ' + angka.toLocaleString('id-ID');
-        }
+    let customModal;
+    let customNameInput;
+    let customQtyInput;
 
-        function renumberRows() {
-            const rows = itemsTableBody.querySelectorAll('tr');
-            let no = 1;
-            rows.forEach(row => {
-                const noCol = row.querySelector('.no-col');
-                if (noCol) noCol.textContent = no++;
-            });
-        }
+    // Bootstrap modal
+    if (window.bootstrap) {
+        const modalEl = document.getElementById('customProductModal');
+        customModal   = new bootstrap.Modal(modalEl);
+        customNameInput = document.getElementById('customNameInput');
+        customQtyInput  = document.getElementById('customQtyInput');
 
-        function recalcRow(row) {
-            const select = row.querySelector('.product-select');
-            const qtyInput = row.querySelector('.qty-input');
-            const priceEl = row.querySelector('.price-display');
-            const subEl = row.querySelector('.subtotal-display');
-            const mode = row.querySelector('.mode-input').value;
+        document.getElementById('btnSaveCustom').addEventListener('click', function () {
+            const nameRaw = (customNameInput.value || '').trim();
+            let qty = parseInt(customQtyInput.value, 10) || 1;
 
-            let price = 0;
-            if (mode === 'normal') {
-                const option = select.options[select.selectedIndex];
-                price = option && option.dataset.price ? parseInt(option.dataset.price, 10) : 0;
+            if (!nameRaw) {
+                alert('Nama produk custom tidak boleh kosong.');
+                customNameInput.focus();
+                return;
             }
+            if (qty < 1) qty = 1;
 
-            const qty = qtyInput.value ? parseInt(qtyInput.value, 10) : 0;
-            const subtotal = price * qty;
+            addCartRow({
+                type: 'custom',
+                id: null,
+                name: nameRaw,
+                voltage: '',
+                price: 0,
+                qty: qty
+            });
 
-            if (mode === 'normal') {
-                priceEl.value = price > 0 ? formatRupiah(price) : '';
-                subEl.value = subtotal > 0 ? formatRupiah(subtotal) : '';
+            customNameInput.value = '';
+            customQtyInput.value  = '1';
+            customModal.hide();
+        });
+    }
+
+    if (btnAddCustom && customModal) {
+        btnAddCustom.addEventListener('click', function () {
+            customNameInput.value = '';
+            customQtyInput.value  = '1';
+            customModal.show();
+            setTimeout(() => customNameInput.focus(), 200);
+        });
+    }
+
+    function formatRupiah(angka) {
+        if (isNaN(angka) || angka <= 0) return 'Rp 0';
+        return 'Rp ' + angka.toLocaleString('id-ID');
+    }
+
+    function recalcCart() {
+        let total = 0;
+
+        cartList.querySelectorAll('.cart-item').forEach(item => {
+            const type  = item.getAttribute('data-row-type') || 'normal';
+            const price = parseInt(item.getAttribute('data-price') || '0', 10);
+            const qtyInput = item.querySelector('.qty-input');
+            const subtotalSpan = item.querySelector('.subtotal-text');
+            const priceSpan    = item.querySelector('.price-text');
+            const qtyHidden    = item.querySelector('.qty-hidden');
+
+            let qty = qtyInput ? parseInt(qtyInput.value || '0', 10) : 0;
+            if (isNaN(qty) || qty < 1) qty = 1;
+
+            if (type === 'normal') {
+                const subtotal = price * qty;
+                if (priceSpan)    priceSpan.textContent    = formatRupiah(price);
+                if (subtotalSpan) subtotalSpan.textContent = formatRupiah(subtotal);
+                total += subtotal;
             } else {
-                priceEl.value = '—';
-                subEl.value = '—';
+                if (priceSpan)    priceSpan.textContent    = '—';
+                if (subtotalSpan) subtotalSpan.textContent = '—';
+            }
+
+            if (qtyHidden) {
+                qtyHidden.value = qty;
+            }
+        });
+
+        grandTotalEl.textContent    = formatRupiah(total);
+        grandTotalBarEl.textContent = formatRupiah(total);
+    }
+
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return String(text).replace(/[&<>"']/g, function (m) { return map[m]; });
+    }
+
+    function escapeHtmlAttr(text) {
+        return escapeHtml(text);
+    }
+
+    function addCartRow(product) {
+        // product: {type, id, name, voltage, price, qty}
+        const type    = product.type || 'normal';
+        const pid     = product.id || '';
+        const name    = product.name || '';
+        const voltage = product.voltage || '';
+        const price   = parseInt(product.price || '0', 10);
+        const qty     = parseInt(product.qty || 1, 10);
+
+        // Jika produk normal sudah ada di keranjang → tambahkan qty saja
+        if (type === 'normal' && pid) {
+            const existing = cartList.querySelector('.cart-item[data-row-type="normal"][data-product-id="' + pid + '"]');
+            if (existing) {
+                const qtyInput = existing.querySelector('.qty-input');
+                if (qtyInput) {
+                    let current = parseInt(qtyInput.value || '0', 10);
+                    if (isNaN(current) || current < 0) current = 0;
+                    qtyInput.value = current + qty;
+                }
+                recalcCart();
+                return;
             }
         }
 
-        function recalcGrandTotal() {
-            let total = 0;
-            itemsTableBody.querySelectorAll('tr').forEach(row => {
-                const mode = row.querySelector('.mode-input').value;
-                if (mode !== 'normal') return; // produk custom: belum ada harga, skip total
+        const item = document.createElement('div');
+        item.className = 'card cart-item mb-2';
+        item.setAttribute('data-row-type', type);
+        item.setAttribute('data-product-id', pid);
+        item.setAttribute('data-price', price);
 
-                const select = row.querySelector('.product-select');
-                const qtyInput = row.querySelector('.qty-input');
-                const option = select.options[select.selectedIndex];
-                const price = option && option.dataset.price ? parseInt(option.dataset.price, 10) : 0;
-                const qty = qtyInput.value ? parseInt(qtyInput.value, 10) : 0;
+        const displayName = name + (voltage && voltage !== '-' ? ' (' + voltage + 'V)' : '');
 
-                total += price * qty;
+        item.innerHTML = `
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div>
+                        <div class="fw-semibold small mb-0">${escapeHtml(displayName)}</div>
+                        ${type === 'custom' ? '<div class="badge bg-secondary mt-1">Custom</div>' : ''}
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger btn-remove-item">&times;</button>
+                </div>
+                <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 gap-2">
+                    <div>
+                        <div class="input-group input-group-sm" style="max-width: 150px;">
+                            <button type="button" class="btn btn-outline-secondary btn-qty-minus">-</button>
+                            <input type="number" class="form-control form-control-sm text-center qty-input"
+                                   value="${qty}" min="1">
+                            <button type="button" class="btn btn-outline-secondary btn-qty-plus">+</button>
+                        </div>
+                    </div>
+                    <div class="text-end small">
+                        <div>Harga / pcs:<br>
+                            <span class="price-text fw-semibold">${type === 'normal' ? formatRupiah(price) : '—'}</span>
+                        </div>
+                        <div class="mt-1">Subtotal:<br>
+                            <span class="subtotal-text fw-semibold">${type === 'normal' ? formatRupiah(price * qty) : '—'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <input type="hidden" name="product_id[]" value="${type === 'normal' ? pid : ''}">
+                <input type="hidden" name="custom_name[]" value="${type === 'custom' ? escapeHtmlAttr(name) : ''}">
+                <input type="hidden" name="qty[]" class="qty-hidden" value="${qty}">
+            </div>
+        `;
+
+        // event qty +/- dan hapus
+        const minusBtn  = item.querySelector('.btn-qty-minus');
+        const plusBtn   = item.querySelector('.btn-qty-plus');
+        const qtyInput  = item.querySelector('.qty-input');
+        const removeBtn = item.querySelector('.btn-remove-item');
+
+        minusBtn.addEventListener('click', function () {
+            let val = parseInt(qtyInput.value || '0', 10);
+            if (isNaN(val) || val <= 1) {
+                val = 1;
+            } else {
+                val--;
+            }
+            qtyInput.value = val;
+            recalcCart();
+        });
+
+        plusBtn.addEventListener('click', function () {
+            let val = parseInt(qtyInput.value || '0', 10);
+            if (isNaN(val) || val < 1) val = 1;
+            val++;
+            qtyInput.value = val;
+            recalcCart();
+        });
+
+        qtyInput.addEventListener('input', function () {
+            let val = parseInt(qtyInput.value || '0', 10);
+            if (isNaN(val) || val < 1) val = 1;
+            qtyInput.value = val;
+            recalcCart();
+        });
+
+        removeBtn.addEventListener('click', function () {
+            item.remove();
+            recalcCart();
+        });
+
+        cartList.appendChild(item);
+        recalcCart();
+    }
+
+    // Klik "Tambah" pada kartu produk
+    productCards.forEach(card => {
+        const btn = card.querySelector('.btn-add-product');
+        if (!btn) return;
+
+        btn.addEventListener('click', function () {
+            const pid     = card.getAttribute('data-id');
+            const name    = card.getAttribute('data-name') || '';
+            const voltage = card.getAttribute('data-voltage') || '';
+            const price   = parseInt(card.getAttribute('data-price') || '0', 10);
+
+            addCartRow({
+                type: 'normal',
+                id: pid,
+                name: name,
+                voltage: voltage,
+                price: price,
+                qty: 1
             });
-            grandTotalEl.textContent = formatRupiah(total);
-        }
-
-        function initSelect2For(element) {
-            $(element).select2({
-                theme: 'bootstrap-5',
-                width: '100%',
-                placeholder: 'Pilih produk...',
-                // allowClear: true, // bisa diaktifkan kalau mau ada tombol x di dalam select
-                dropdownParent: $('#orderItemsWrapper')
-            });
-        }
-
-        function addRow() {
-            const clone = rowTemplate.content.cloneNode(true);
-            itemsTableBody.appendChild(clone);
-            const newRow = itemsTableBody.querySelector('tr:last-child');
-
-            const select = newRow.querySelector('.product-select');
-            const qtyInput = newRow.querySelector('.qty-input');
-            const btnDel = newRow.querySelector('.btn-remove-row');
-            const modeInput = newRow.querySelector('.mode-input');
-            const customToggle = newRow.querySelector('.custom-toggle');
-            const customInput = newRow.querySelector('.custom-name-input');
-
-            // aktifkan select2
-            initSelect2For(select);
-
-            // event change untuk select2
-            $(select).on('change', function () {
-                recalcRow(newRow);
-                recalcGrandTotal();
-            });
-
-            qtyInput.addEventListener('input', function () {
-                recalcRow(newRow);
-                recalcGrandTotal();
-            });
-
-            btnDel.addEventListener('click', function () {
-                newRow.remove();
-                renumberRows();
-                recalcGrandTotal();
-            });
-
-            // toggle produk custom
-            customToggle.addEventListener('change', function () {
-                if (customToggle.checked) {
-                    // mode custom
-                    modeInput.value = 'custom';
-
-                    // kosongkan dan disable select2
-                    $(select).val(null).trigger('change');
-                    $(select).prop('disabled', true);
-
-                    // tampilkan input custom
-                    customInput.classList.remove('d-none');
-                    customInput.focus();
-
-                    // harga & subtotal jadi tanda strip
-                    newRow.querySelector('.price-display').value = '—';
-                    newRow.querySelector('.subtotal-display').value = '—';
-                    recalcGrandTotal();
-                } else {
-                    // kembali ke mode normal
-                    modeInput.value = 'normal';
-
-                    $(select).prop('disabled', false);
-
-                    customInput.classList.add('d-none');
-                    customInput.value = '';
-
-                    recalcRow(newRow);
-                    recalcGrandTotal();
-                }
-            });
-
-            renumberRows();
-            recalcRow(newRow);
-            recalcGrandTotal();
-        }
-
-        // tambah 1 baris default saat halaman dibuka
-        addRow();
-
-        // tombol tambah produk
-        btnAddItem.addEventListener('click', function () {
-            addRow();
         });
     });
+
+    // Search produk (multi kata: "headlamp foglamp" → semua kata harus ada)
+    if (productSearchInput) {
+        productSearchInput.addEventListener('input', function () {
+            const q = (this.value || '').toLowerCase().trim();
+            const tokens = q.split(/\s+/).filter(Boolean);
+
+            productCards.forEach(card => {
+                const wrapper = card.parentElement; // col-...
+                const text = (card.getAttribute('data-search') || '').toLowerCase();
+
+                if (tokens.length === 0) {
+                    wrapper.classList.remove('d-none');
+                    return;
+                }
+
+                const match = tokens.every(t => text.indexOf(t) !== -1);
+
+                if (match) {
+                    wrapper.classList.remove('d-none');
+                } else {
+                    wrapper.classList.add('d-none');
+                }
+            });
+        });
+    }
+});
 </script>
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>
