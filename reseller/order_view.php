@@ -44,6 +44,24 @@ $stmt = $pdo->prepare("
 $stmt->execute([$id]);
 $items = $stmt->fetchAll();
 
+// Bagi item menjadi: belum selesai & selesai (berdasarkan sisa kirim)
+$unfinishedItems = [];
+$finishedItems = [];
+
+foreach ($items as $row) {
+    $qtyOrder = (int) $row['qty_order'];
+    $qtyShipped = (int) $row['qty_shipped'];
+    $sisa = $qtyOrder - $qtyShipped;
+
+    if ($sisa > 0) {
+        $unfinishedItems[] = $row;
+    } else {
+        // sisa <= 0 dianggap selesai (kalau qty 0 ya diabaikan logikanya,
+        // tapi normalnya qty_order minimal 1)
+        $finishedItems[] = $row;
+    }
+}
+
 // Hitung total order berdasarkan harga produk
 $totalOrder = 0;
 $totalQtyOrder = 0;
@@ -102,7 +120,7 @@ if ($shipments) {
             oi.product_id,
             COALESCE(oi.custom_name, p.name) AS product_name
         FROM shipment_items si
-        JOIN order_items oi ON oi.id = si.order_item_id
+        JOIN order_items oi ON oi.id = si.shipment_id
         LEFT JOIN products p ON p.id = oi.product_id
         WHERE si.shipment_id IN ($placeholders)
     ";
@@ -150,7 +168,111 @@ include __DIR__ . '/../partials/header.php';
     </div>
 </div>
 
-<h5>Item Order</h5>
+<!-- TABEL 1: ITEM BELUM SELESAI -->
+<h5>Item Belum Selesai</h5>
+<div class="card mb-4">
+    <div class="card-body">
+        <?php if (!$unfinishedItems): ?>
+            <p class="text-muted mb-0">Semua item sudah selesai dikirim.</p>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table id="unfinishedTable" class="table table-sm table-bordered align-middle">
+                    <thead>
+                        <tr>
+                            <th class="text-center align-middle" style="width:50px;">No</th>
+                            <th class="text-center align-middle">Nama Produk</th>
+                            <th class="text-center align-middle">Qty Pesan</th>
+                            <th class="text-center align-middle">Sisa Kirim</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $no = 1;
+                        foreach ($unfinishedItems as $it):
+                            $qtyOrder = (int) $it['qty_order'];
+                            $qtyDone = (int) $it['qty_done'];
+                            $qtyShipped = (int) $it['qty_shipped'];
+                            $sisa = $qtyOrder - $qtyShipped;
+                            ?>
+                            <tr>
+                                <td class="text-center"><?= $no++ ?></td>
+                                <td>
+                                    <?= esc($it['name']) ?>
+                                    <?php
+                                    $volt = trim((string) $it['voltage']);
+                                    if ($volt !== '' && $volt !== '-') {
+                                        echo ' (' . esc($volt) . 'V)';
+                                    }
+                                    ?>
+                                </td>
+                                <td class="text-center"><?= $qtyOrder ?></td>
+                                <td class="text-center">
+                                    <?php
+                                    if ($sisa <= 0) {
+                                        echo '<span class="badge bg-success">0</span>';
+                                    } elseif ($sisa < $qtyOrder) {
+                                        echo '<span class="badge bg-warning">' . (int) $sisa . '</span>';
+                                    } else {
+                                        echo '<span class="badge bg-danger">' . (int) $sisa . '</span>';
+                                    }
+                                    ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- TABEL 2: ITEM SELESAI -->
+<h5>Item Selesai</h5>
+<div class="card mb-4">
+    <div class="card-body">
+        <?php if (!$finishedItems): ?>
+            <p class="text-muted mb-0">Belum ada item yang selesai dikirim.</p>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table id="finishedTable" class="table table-sm table-bordered align-middle">
+                    <thead>
+                        <tr>
+                            <th class="text-center align-middle" style="width:50px;">No</th>
+                            <th class="text-center align-middle">Nama Produk</th>
+                            <th class="text-center align-middle">Qty Pesan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $no = 1;
+                        foreach ($finishedItems as $it):
+                            $qtyOrder = (int) $it['qty_order'];
+                            $qtyDone = (int) $it['qty_done'];
+                            $qtyShipped = (int) $it['qty_shipped'];
+                            ?>
+                            <tr>
+                                <td class="text-center"><?= $no++ ?></td>
+                                <td>
+                                    <?= esc($it['name']) ?>
+                                    <?php
+                                    $volt = trim((string) $it['voltage']);
+                                    if ($volt !== '' && $volt !== '-') {
+                                        echo ' (' . esc($volt) . 'V)';
+                                    }
+                                    ?>
+                                </td>
+                                <td class="text-center"><?= $qtyOrder ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- TABEL 3: ITEM ORDER (LENGKAP, DENGAN HARGA + DATATABLES) -->
+<h5>Item Order (Detail Lengkap)</h5>
 <div class="card mb-4">
     <div class="card-body">
         <table id="itemsTable" class="table table-sm table-bordered align-middle w-100">
@@ -159,7 +281,7 @@ include __DIR__ . '/../partials/header.php';
                     <th class="text-center">No</th>
                     <th class="text-nowrap text-center">Nama Produk</th>
                     <th class="text-center align-middle">Qty Pesan</th>
-                    <th class="text-center align-middle align-items-center">Harga / pcs</th>
+                    <th class="text-center align-middle">Harga / pcs</th>
                     <th class="text-center">Subtotal</th>
                     <th class="text-center">Produksi Selesai</th>
                     <th class="text-center">Sudah Dikirim</th>
@@ -175,14 +297,16 @@ include __DIR__ . '/../partials/header.php';
                     <?php
                     $no = 1;
                     foreach ($items as $it):
-                        $sisa = $it['qty_order'] - $it['qty_shipped'];
+                        $qtyOrder = (int) $it['qty_order'];
+                        $qtyDone = (int) $it['qty_done'];
+                        $qtyShipped = (int) $it['qty_shipped'];
+                        $sisa = $qtyOrder - $qtyShipped;
                         $price = isset($it['unit_price']) ? (int) $it['unit_price'] : 0;
-                        $qty = (int) $it['qty_order'];
-                        $sub = $price > 0 && $qty > 0 ? $price * $qty : 0;
+                        $sub = ($price > 0 && $qtyOrder > 0) ? $price * $qtyOrder : 0;
                         ?>
                         <tr>
                             <td class="text-center"><?= $no++ ?></td>
-                            <td class="">
+                            <td>
                                 <?= esc($it['name']) ?>
                                 <?php
                                 $volt = trim((string) $it['voltage']);
@@ -191,26 +315,23 @@ include __DIR__ . '/../partials/header.php';
                                 }
                                 ?>
                             </td>
-                            <td class="text-center"><?= (int) $it['qty_order'] ?></td>
+                            <td class="text-center"><?= $qtyOrder ?></td>
                             <td class="text-center">
                                 <?= $price > 0 ? format_rupiah($price) : '<span class="text-muted">-</span>' ?>
                             </td>
                             <td class="text-center">
                                 <?= $sub > 0 ? format_rupiah($sub) : '<span class="text-muted">-</span>' ?>
                             </td>
-                            <td class="text-center"><?= (int) $it['qty_done'] ?></td>
-                            <td class="text-center"><?= (int) $it['qty_shipped'] ?></td>
+                            <td class="text-center"><?= $qtyDone ?></td>
+                            <td class="text-center"><?= $qtyShipped ?></td>
                             <td class="text-center">
                                 <?php
-                                $sisaInt = (int) $sisa;
-                                if ($sisaInt === 0) {
+                                if ($sisa <= 0) {
                                     echo '<span class="badge bg-success">0</span>';
-                                } else if ($sisaInt < $qty) {
-                                    ?> <span class="badge bg-warning"><?= $sisaInt; ?></span>
-                                    <?php
+                                } elseif ($sisa < $qtyOrder) {
+                                    echo '<span class="badge bg-warning">' . (int) $sisa . '</span>';
                                 } else {
-                                    ?> <span class="badge bg-danger"><?= $sisaInt; ?></span>
-                                    <?php
+                                    echo '<span class="badge bg-danger">' . (int) $sisa . '</span>';
                                 }
                                 ?>
                             </td>
@@ -219,13 +340,45 @@ include __DIR__ . '/../partials/header.php';
                 <?php endif; ?>
             </tbody>
         </table>
-
     </div>
 </div>
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        if (window.jQuery && jQuery.fn.DataTable) {
+        if (!(window.jQuery && jQuery.fn.DataTable)) {
+            return;
+        }
+
+        // Tabel 1: Item Belum Selesai
+        if (jQuery('#unfinishedTable').length) {
+            jQuery('#unfinishedTable').DataTable({
+                searching: false,
+                ordering: false,
+                info: false,
+                responsive: true,
+                language: {
+                    emptyTable: "Tidak ada item belum selesai.",
+                    lengthMenu: "Menampilkan _MENU_ data"
+                }
+            });
+        }
+
+        // Tabel 2: Item Selesai
+        if (jQuery('#finishedTable').length) {
+            jQuery('#finishedTable').DataTable({
+                searching: false,
+                ordering: false,
+                info: false,
+                responsive: true,
+                language: {
+                    emptyTable: "Tidak ada item selesai.",
+                    lengthMenu: "Menampilkan _MENU_ data"
+                }
+            });
+        }
+
+        // Tabel 3: Item Order (Detail Lengkap) - tetap pakai Responsive + kolom No sebagai dtr-control
+        if (jQuery('#itemsTable').length) {
             jQuery('#itemsTable').DataTable({
                 searching: false,
                 info: false,
@@ -247,12 +400,10 @@ include __DIR__ . '/../partials/header.php';
                     lengthMenu: "Menampilkan _MENU_ data"
                 }
             });
-
-
         }
     });
-
 </script>
+
 
 <?php if ($payments): ?>
     <h5>Pembayaran</h5>
