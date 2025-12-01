@@ -37,7 +37,7 @@ $user = current_user();
 
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
         <div class="container-fluid">
-            <a class="navbar-brand" href="<?= esc(BASE_URL) ?>">RelayLab Order Management System</a>
+            <a class="navbar-brand" href="<?= esc(BASE_URL) ?>">Order Management System</a>
 
             <?php if ($user): ?>
                 <!-- Tombol menu (hamburger) untuk tampilan mobile -->
