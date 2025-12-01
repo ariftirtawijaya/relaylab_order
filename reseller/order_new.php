@@ -190,7 +190,18 @@ include __DIR__ . '/../partials/header.php';
             <div id="cartList">
                 <!-- item keranjang akan ditambahkan via JS sebagai .cart-item -->
             </div>
-
+            <!-- Tambahkan di bawah keranjang -->
+            <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1055">
+                <div id="toastAdded" class="toast align-items-center text-bg-success border-0" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body small">
+                            Produk ditambahkan ke keranjang
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                            data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            </div>
             <hr class="my-3">
 
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -203,6 +214,9 @@ include __DIR__ . '/../partials/header.php';
             </div>
         </div>
     </div>
+
+
+
 
     <!-- BAR BAWAH TOTAL (ikut submit) -->
     <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
@@ -297,6 +311,13 @@ include __DIR__ . '/../partials/header.php';
                     price: 0,
                     qty: qty
                 });
+
+                // setelah addCartRow(...)
+                const toastEl = document.getElementById('toastAdded');
+                if (window.bootstrap && toastEl) {
+                    const toast = new bootstrap.Toast(toastEl);
+                    toast.show();
+                }
 
                 customNameInput.value = '';
                 customQtyInput.value = '1';
@@ -476,6 +497,9 @@ include __DIR__ . '/../partials/header.php';
             recalcCart();
         }
 
+
+
+
         // ============================
         //  P R O D U K  G R I D  +  P A G E
         // ============================
@@ -499,6 +523,13 @@ include __DIR__ . '/../partials/header.php';
                     price: price,
                     qty: 1
                 });
+
+                // setelah addCartRow(...)
+                const toastEl = document.getElementById('toastAdded');
+                if (window.bootstrap && toastEl) {
+                    const toast = new bootstrap.Toast(toastEl);
+                    toast.show();
+                }
             });
         });
 
