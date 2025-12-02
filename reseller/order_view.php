@@ -115,15 +115,16 @@ if ($shipments) {
     $placeholders = implode(',', array_fill(0, count($shipmentIds), '?'));
 
     $sql = "
-        SELECT 
-            si.*,
-            oi.product_id,
-            COALESCE(oi.custom_name, p.name) AS product_name
-        FROM shipment_items si
-        JOIN order_items oi ON oi.id = si.shipment_id
-        LEFT JOIN products p ON p.id = oi.product_id
-        WHERE si.shipment_id IN ($placeholders)
-    ";
+    SELECT 
+        si.*,
+        oi.product_id,
+        COALESCE(oi.custom_name, p.name) AS product_name
+    FROM shipment_items si
+    JOIN order_items oi ON oi.id = si.order_item_id
+    LEFT JOIN products p ON p.id = oi.product_id
+    WHERE si.shipment_id IN ($placeholders)
+";
+
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($shipmentIds);
