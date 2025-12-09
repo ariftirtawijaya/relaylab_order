@@ -25,7 +25,7 @@ function generate_order_code(PDO $pdo): string
 {
     // Format tanggal: DDMMYY
     $datePart = date('dmy');
-    $prefix   = 'RL-' . $datePart . '-';
+    $prefix = 'RL-' . $datePart . '-';
 
     // Ambil nomor urut terakhir untuk hari ini
     // Contoh code di DB: RL-271125-0003 -> ambil 3
@@ -38,11 +38,11 @@ function generate_order_code(PDO $pdo): string
     $stmt->execute([':prefix' => $prefix . '%']);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $last = isset($row['max_seq']) ? (int)$row['max_seq'] : 0;
+    $last = isset($row['max_seq']) ? (int) $row['max_seq'] : 0;
     $next = $last + 1;
 
     // Pad jadi 4 digit: 1 -> 0001, 12 -> 0012, dst.
-    $seq = str_pad((string)$next, 4, '0', STR_PAD_LEFT);
+    $seq = str_pad((string) $next, 4, '0', STR_PAD_LEFT);
 
     return $prefix . $seq;
 }
@@ -89,4 +89,74 @@ function generate_product_code(PDO $pdo): string
 
     // Format: RL-P-0001, RL-P-0002, dst
     return sprintf('RL-P-%04d', $num);
+}
+
+function send_wa_notification($target, $message)
+{
+    $token = 'yNuNwRkmU8L4YDyF1NQi';
+
+    $curl = curl_init();
+
+    curl_setopt_array($curl, [
+        CURLOPT_URL => 'https://api.fonnte.com/send',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST => 'POST',
+        CURLOPT_POSTFIELDS => [
+            'target' => $target,
+            'message' => $message,
+            'countryCode' => '62'
+        ],
+        CURLOPT_HTTPHEADER => [
+            'Authorization: ' . $token
+        ],
+    ]);
+
+    $response = curl_exec($curl);
+
+    if (curl_errno($curl)) {
+        error_log("CURL ERROR: " . curl_error($curl));
+    }
+
+    curl_close($curl);
+
+    error_log("FONNTE RESPONSE: " . $response);
+
+    return $response;
+}
+
+function send_wa_notification_with_file($target, $message, $filePath)
+{
+    $token = 'yNuNwRkmU8L4YDyF1NQi';
+
+    // filePath harus path lokal, contoh:
+    // C:\xampp\htdocs\oms\uploads\resi\resi_xxx.jpg
+    if (!$filePath || !file_exists($filePath)) {
+        error_log("FONNTE FILE ERROR: file not found at $filePath");
+        return;
+    }
+
+    $curl = curl_init();
+
+    curl_setopt_array($curl, [
+        CURLOPT_URL => 'https://api.fonnte.com/send',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => [
+            'target' => $target,
+            'message' => $message,
+            'countryCode' => '62',
+            'file' => new CURLFile($filePath),
+        ],
+        CURLOPT_HTTPHEADER => ["Authorization: $token"],
+    ]);
+
+    $res = curl_exec($curl);
+
+    if (curl_errno($curl)) {
+        error_log("CURL ERROR (FILE): " . curl_error($curl));
+    } else {
+        error_log("FONNTE RESPONSE (FILE): " . $res);
+    }
+
+    curl_close($curl);
 }

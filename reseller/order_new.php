@@ -96,6 +96,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->commit();
+            // =====================
+// WHATSAPP NOTIFICATION
+// =====================
+            $stmtW = $pdo->prepare("
+    SELECT r.whatsapp, r.name
+    FROM users u
+    JOIN resellers r ON r.id = u.reseller_id
+    WHERE u.id = ?
+    LIMIT 1
+");
+            $stmtW->execute([$user['id']]);
+            $waData = $stmtW->fetch();
+            // ambil nomor WA reseller
+            $resWA = $waData['whatsapp'];
+            $adminWA = '6289529303412'; // nomor admin
+            // Ambil semua nama produk untuk kebutuhan WA
+            $productMap = [];
+            $ps = $pdo->query("SELECT id, name FROM products")->fetchAll();
+            foreach ($ps as $pp) {
+                $productMap[$pp['id']] = $pp['name'];
+            }
+
+            $itemsText = "";
+            foreach ($items as $it) {
+
+                if ($it['product_id']) {
+                    // produk normal → ambil dari map
+                    $name = $productMap[$it['product_id']] ?? ('Produk ID ' . $it['product_id']);
+                } else {
+                    // produk custom
+                    $name = $it['custom_name'];
+                }
+
+                $itemsText .= "- {$name} ({$it['qty']} pcs)\n";
+            }
+
+            // Pesan untuk reseller
+            $msgReseller =
+                "🛒 *Order Berhasil Dibuat!*\n" .
+                "---------------------------------\n" .
+                "Kode Order: *{$orderCode}*\n" .
+                "Tanggal: " . date('d-m-Y H:i') . "\n" .
+                "\n*Daftar Item:*\n{$itemsText}" .
+                "\nStatus: Menunggu Konfirmasi Admin\n" .
+                "\nTerima kasih sudah order di RelayLab! 🙏";
+
+            // Pesan untuk admin
+            $msgAdmin =
+                "📢 *Order Baru Masuk!*\n" .
+                "---------------------------------\n" .
+                "Kode Order: *{$orderCode}*\n" .
+                "Reseller: {$user['name']}\n" .
+                "WA: {$resWA}\n\n" .
+                "*Daftar Item:*\n{$itemsText}" .
+                "\nSegera review order ini di dashboard admin.";
+
+            // kirim WA
+            if ($resWA) {
+                send_wa_notification($resWA, $msgReseller);
+            }
+            send_wa_notification($adminWA, $msgAdmin);
+
 
             redirect('reseller/order_view.php?id=' . $orderId);
         } catch (Throwable $e) {
