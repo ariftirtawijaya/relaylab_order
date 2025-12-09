@@ -104,7 +104,7 @@ exit;
 // ===== FUNGSI KIRIM WA KE FONNTE =====
 function sendFonnte($target, $data)
 {
-    $token = 'TOKEN_FONNTE_KAMU';
+    $token = 'yNuNwRkmU8L4YDyF1NQi';
 
     $payload = [
         'target' => $target,
