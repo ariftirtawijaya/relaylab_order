@@ -1,8 +1,8 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/config/db.php';      // kalau perlu akses DB
-// require_once __DIR__ . '/app/helpers.php'; // kalau mau pakai helper dll
+require_once __DIR__ . '../app/db.php';      // kalau perlu akses DB
+require_once __DIR__ . '../app/helpers.php'; // kalau mau pakai helper dll
 
 $json = file_get_contents('php://input');
 $data = json_decode($json, true);
