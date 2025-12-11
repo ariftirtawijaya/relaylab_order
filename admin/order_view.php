@@ -305,7 +305,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
                     "Pesanan kamu sudah dikirim!\n\n" .
                     "*Ekspedisi:* {$courier}\n" .
                     "*No Resi:* {$tracking}\n" .
-                    "*Tanggal:* {$shipDate}\n\n" .
+                    "*Tanggal:* {$shipDate}\n" .
+                    "*Catatan:* {$notes}\n\n" .
                     "*Produk yang dikirim:*\n{$itemText}\n" .
                     ($resiFilename ? "Foto resi terlampir di atas.\n\n" : "\n") .
                     "Terima kasih sudah order 🙏";
