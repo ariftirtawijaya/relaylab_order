@@ -54,7 +54,7 @@ function sendFonnte($target, array $data)
 function whatsapp_send_group(string $text): void
 {
     $token = "yNuNwRkmU8L4YDyF1NQi";
-    $group_id = "120363422006298260@g.us"; // ganti ID grup kamu
+    $group_id = "120363423364634328@g.us"; // ganti ID grup kamu
 
     $curl = curl_init();
     curl_setopt_array($curl, [
