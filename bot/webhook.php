@@ -53,22 +53,37 @@ function sendFonnte($target, array $data)
 // --- Kirim pesan ke grup ---
 function whatsapp_send_group(string $text): void
 {
-    $token = "yNuNwRkmU8L4YDyF1NQi";
-    $group_id = "120363423364634328@g.us"; // ganti ID grup kamu
+    try {
+        $token = "yNuNwRkmU8L4YDyF1NQi";   // Ganti dengan token Fonnte Anda
+        $group_id = "120363424390701667@g.us";    // Ganti dengan ID Group WhatsApp, format: 628xxxxxxx-xxxxx@g.us
 
-    $curl = curl_init();
-    curl_setopt_array($curl, [
-        CURLOPT_URL => 'https://api.fonnte.com/send',
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => [
-            'target' => $group_id,
-            'message' => $text,
-        ],
-        CURLOPT_HTTPHEADER => ["Authorization: {$token}"],
-    ]);
-    curl_exec($curl);
-    curl_close($curl);
+        $curl = curl_init();
+
+        curl_setopt_array($curl, array(
+            CURLOPT_URL => 'https://api.fonnte.com/send',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => array(
+                'target' => $group_id,
+                'message' => $text,
+            ),
+            CURLOPT_HTTPHEADER => array(
+                'Authorization: ' . $token
+            ),
+        ));
+
+        $response = curl_exec($curl);
+        $error = curl_error($curl);
+        curl_close($curl);
+    } catch (Throwable $e) {
+        error_log('Whatsapp exception: ' . $e->getMessage());
+    }
+
 }
 
 // --- Helper: normalisasi nomor WA ke format lokal (0895...) ---
@@ -131,7 +146,7 @@ if (!empty($announceState[$sender])) {
     file_put_contents($announceFile, json_encode($announceState));
 
     // Kirim ke grup
-    whatsapp_send_group("📢 *Pengumuman dari {$name}:*\n\n{$message}");
+    whatsapp_send_group("📢 $message");
     sendFonnte($sender, ['message' => "Pesan pengumuman sudah dikirim ke grup. ✅"]);
     echo json_encode(['status' => true]);
     exit;
