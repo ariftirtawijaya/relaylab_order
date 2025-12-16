@@ -55,7 +55,7 @@ function whatsapp_send_group(string $text): void
 {
     try {
         $token = "yNuNwRkmU8L4YDyF1NQi";   // Ganti dengan token Fonnte Anda
-        $group_id = "120363424390701667@g.us";    // Ganti dengan ID Group WhatsApp, format: 628xxxxxxx-xxxxx@g.us
+        $group_id = "120363422006298260@g.us";    // Ganti dengan ID Group WhatsApp, format: 628xxxxxxx-xxxxx@g.us
 
         $curl = curl_init();
 
