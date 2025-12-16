@@ -50,6 +50,27 @@ function sendFonnte($target, array $data)
     return $response;
 }
 
+// --- Kirim pesan ke grup ---
+function whatsapp_send_group(string $text): void
+{
+    $token = "yNuNwRkmU8L4YDyF1NQi";
+    $group_id = "120363422006298260@g.us"; // ganti ID grup kamu
+
+    $curl = curl_init();
+    curl_setopt_array($curl, [
+        CURLOPT_URL => 'https://api.fonnte.com/send',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => [
+            'target' => $group_id,
+            'message' => $text,
+        ],
+        CURLOPT_HTTPHEADER => ["Authorization: {$token}"],
+    ]);
+    curl_exec($curl);
+    curl_close($curl);
+}
+
 // --- Helper: normalisasi nomor WA ke format lokal (0895...) ---
 function normalize_wa_to_local(string $wa): string
 {
@@ -90,6 +111,31 @@ if ($sender === '' || $message === '') {
 
 // Normalisasi ke format lokal (0895...) untuk dicocokkan dengan resellers.whatsapp
 $senderLocal = normalize_wa_to_local($sender);
+
+// ====== FITUR /pengumuman ======
+$announceFile = __DIR__ . '/announce_state.json';
+$announceState = file_exists($announceFile) ? json_decode(file_get_contents($announceFile), true) : [];
+
+// Jika user kirim "/pengumuman"
+if (preg_match('/^\/pengumuman$/i', $message)) {
+    $announceState[$sender] = true; // aktifkan mode menulis
+    file_put_contents($announceFile, json_encode($announceState));
+    sendFonnte($sender, ['message' => "Silahkan isi pesan pengumuman."]);
+    echo json_encode(['status' => true]);
+    exit;
+}
+
+// Jika sedang dalam mode pengumuman
+if (!empty($announceState[$sender])) {
+    unset($announceState[$sender]);
+    file_put_contents($announceFile, json_encode($announceState));
+
+    // Kirim ke grup
+    whatsapp_send_group("📢 *Pengumuman dari {$name}:*\n\n{$message}");
+    sendFonnte($sender, ['message' => "Pesan pengumuman sudah dikirim ke grup. ✅"]);
+    echo json_encode(['status' => true]);
+    exit;
+}
 
 // =============== ROUTING PERINTAH ===============
 
