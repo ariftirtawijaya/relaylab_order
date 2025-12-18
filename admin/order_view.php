@@ -125,7 +125,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     redirect('admin/order_view.php?id=' . $id);
 }
 
-
 // ====== HANDLE LAMA: update qty_done (progress produksi) ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_progress'])) {
     $qty_done = $_POST['qty_done'] ?? [];
@@ -147,7 +146,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_progress'])) {
     redirect('admin/order_view.php?id=' . $id);
 }
 
-// ====== HANDLE: tambah pengiriman (dengan foto resi + WA) ======
 // ====== HANDLE: tambah pengiriman ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     $courier = trim($_POST['courier'] ?? '');
@@ -330,9 +328,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     }
 }
 
-
-
-
 // ====== AMBIL DATA ORDER ======
 $stmt = $pdo->prepare("SELECT o.*, r.name AS reseller_name
   FROM orders o
@@ -350,6 +345,7 @@ $stmt = $pdo->prepare("
         oi.*,
         p.code,
         p.price AS unit_price,
+        p.voltage,
         COALESCE(oi.custom_name, p.name) AS name,
         oi.custom_name AS raw_custom_name
     FROM order_items oi
@@ -411,7 +407,7 @@ if ($shipments) {
     $shipmentIds = array_column($shipments, 'id');
     $in = implode(',', array_fill(0, count($shipmentIds), '?'));
     $stmt = $pdo->prepare(
-        "SELECT si.*, oi.product_id,
+        "SELECT si.*, oi.product_id, p.voltage,
                 COALESCE(oi.custom_name, p.name) AS product_name
          FROM shipment_items si
          JOIN order_items oi ON oi.id = si.order_item_id
@@ -662,7 +658,14 @@ include __DIR__ . '/../partials/header.php';
                         continue;
                     ?>
                     <tr>
-                        <td><?= esc($it['name']) ?></td>
+                        <td><?= esc($it['name']) ?>
+                            <?php
+                            $volt = trim((string) $it['voltage']);
+                            if ($volt !== '' && $volt !== '-') {
+                                echo ' (' . esc($volt) . 'V)';
+                            }
+                            ?>
+                        </td>
                         <td><?= (int) $it['qty_order'] ?></td>
                         <td><?= (int) $it['qty_shipped'] ?></td>
                         <td><?= (int) $sisa ?></td>
@@ -704,7 +707,14 @@ include __DIR__ . '/../partials/header.php';
                             <tbody>
                                 <?php foreach ($shipmentItems[$s['id']] as $si): ?>
                                     <tr>
-                                        <td><?= esc($si['product_name']) ?></td>
+                                        <td><?= esc($si['product_name']) ?>
+                                            <?php
+                                            $volt = trim((string) $si['voltage']);
+                                            if ($volt !== '' && $volt !== '-') {
+                                                echo ' (' . esc($volt) . 'V)';
+                                            }
+                                            ?>
+                                        </td>
                                         <td><?= (int) $si['qty'] ?></td>
                                     </tr>
                                 <?php endforeach; ?>
