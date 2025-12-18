@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $product_ids = $_POST['product_id'] ?? [];
     $custom_names = $_POST['custom_name'] ?? [];
+    $volt = $_POST['voltage'] ?? [];
     $qtys = $_POST['qty'] ?? [];
 
     $items = [];
@@ -44,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // produk normal
                 $items[] = [
                     'product_id' => $pid,
+                    'voltage' => $volt,
                     'custom_name' => null,
                     'qty' => $qty,
                 ];
@@ -51,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // produk custom
                 $items[] = [
                     'product_id' => null,
+                    'voltage' => $volt,
                     'custom_name' => $cname,
                     'qty' => $qty,
                 ];
@@ -124,12 +127,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($it['product_id']) {
                     // produk normal → ambil dari map
                     $name = $productMap[$it['product_id']] ?? ('Produk ID ' . $it['product_id']);
+                    $voltase = trim((string) $productMap[$it['voltage']]);
+                    if ($voltase !== '' && $voltase !== '-') {
+                        echo esc($voltase) . 'V';
+                    }
                 } else {
                     // produk custom
                     $name = $it['custom_name'];
                 }
 
-                $itemsText .= "- {$name} ({$it['qty']} pcs)\n";
+                $itemsText .= "- {$name} {$voltase} ({$it['qty']} pcs)\n";
             }
 
             // Pesan untuk reseller
