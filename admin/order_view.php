@@ -568,6 +568,12 @@ include __DIR__ . '/../partials/header.php';
                         <td><?= $no++ ?></td>
                         <td>
                             <?= esc($it['name']) ?>
+                            <?php
+                            $volt = trim((string) $it['voltage']);
+                            if ($volt !== '' && $volt !== '-') {
+                                echo ' (' . esc($volt) . 'V)';
+                            }
+                            ?>
                             <?php if ($isCustom && $it['raw_custom_name']): ?>
                                 <br>
                                 <span class="badge bg-warning text-dark">Custom: butuh mapping</span>
