@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_payment'])) {
     // Hilangkan titik pemisah ribuan kalau ada
     $amount_clean = str_replace(['.', ',', ' '], '', $amount_raw);
     $amount = (int) $amount_clean;
-    $notes = trim($_POST['notes'] ?? '');
+    $notes = trim($_POST['notes'] ?? '-');
 
     if ($amount > 0) {
         $stmt = $pdo->prepare("
@@ -150,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_progress'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     $courier = trim($_POST['courier'] ?? '');
     $tracking = trim($_POST['tracking_number'] ?? '');
-    $notes = trim($_POST['notes'] ?? '');
+    $notes = trim($_POST['notes'] ?? '-');
 
     // Tanggal kirim manual, fallback ke sekarang
     $shipDate = trim($_POST['ship_date'] ?? '');
@@ -279,9 +279,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
             $resWA = $res['whatsapp'] ?? null;
             $resName = $res['name'] ?? '';
 
-            // ==== Susun daftar item yang dikirim ====
+            // ==== Susun daftar item yang dikirim (plus voltage) ====
             $stmtItems = $pdo->prepare("
-                SELECT COALESCE(oi.custom_name, p.name) AS name, si.qty
+                SELECT 
+                    COALESCE(oi.custom_name, p.name) AS name,
+                    p.voltage,
+                    si.qty
                 FROM shipment_items si
                 JOIN order_items oi ON oi.id = si.order_item_id
                 LEFT JOIN products p ON p.id = oi.product_id
@@ -292,7 +295,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
 
             $itemText = "";
             foreach ($sentItems as $si) {
-                $itemText .= "- {$si['name']} ({$si['qty']} pcs)\n";
+                $volt = trim((string) ($si['voltage'] ?? ''));
+                $voltText = ($volt !== '' && $volt !== '-') ? ' ' . $volt . 'V' : '';
+
+                // Contoh hasil: "- Relay Set Biled Foglamp STD 12V (1 pcs)"
+                $itemText .= "- {$si['name']}{$voltText} ({$si['qty']} pcs)\n";
             }
 
             // ==== Kirim WA ====
@@ -636,7 +643,7 @@ include __DIR__ . '/../partials/header.php';
 
         <div class="col-md-4 mb-2">
             <label class="form-label">Catatan (optional)</label>
-            <input type="text" name="notes" class="form-control form-control-sm">
+            <input type="text" name="notes" value="-" class="form-control form-control-sm">
         </div>
     </div>
 
