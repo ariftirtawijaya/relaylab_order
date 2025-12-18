@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $product_ids = $_POST['product_id'] ?? [];
     $custom_names = $_POST['custom_name'] ?? [];
-    $volt = $_POST['voltage'] ?? [];
+    $voltages = $_POST['voltage'] ?? [];
     $qtys = $_POST['qty'] ?? [];
 
     $items = [];
@@ -36,13 +36,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pid = isset($product_ids[$i]) ? (int) $product_ids[$i] : 0;
             $cname = isset($custom_names[$i]) ? trim($custom_names[$i]) : '';
             $qty = (int) ($qtys[$i] ?? 0);
+            $volt = $voltages[$i] ?? null;
 
-            if ($qty <= 0) {
+            if ($qty <= 0)
                 continue;
-            }
 
             if ($pid > 0) {
-                // produk normal
                 $items[] = [
                     'product_id' => $pid,
                     'voltage' => $volt,
@@ -50,7 +49,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'qty' => $qty,
                 ];
             } elseif ($cname !== '') {
-                // produk custom
                 $items[] = [
                     'product_id' => null,
                     'voltage' => $volt,
@@ -64,13 +62,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($items)) {
         $error = "Minimal harus ada 1 produk di keranjang.";
     } else {
+
+        // ==========================
+        //  BAGIAN TRANSAKSI DB
+        // ==========================
         try {
             $pdo->beginTransaction();
 
-            // generate kode order (fungsi generate_order_code sudah ada di helpers)
             $orderCode = generate_order_code($pdo);
 
-            // insert ke orders (struktur mengikuti sistem yang sudah berjalan)
             $stmt = $pdo->prepare("
                 INSERT INTO orders (code, reseller_id, order_date, status, notes_reseller, created_by)
                 VALUES (?, ?, NOW(), 'menunggu_konfirmasi', ?, ?)
@@ -83,7 +83,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $orderId = $pdo->lastInsertId();
 
-            // insert item order
             $stmtItem = $pdo->prepare("
                 INSERT INTO order_items (order_id, product_id, custom_name, qty_order, qty_done, qty_shipped, note)
                 VALUES (?, ?, ?, ?, 0, 0, '')
@@ -99,22 +98,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->commit();
-            // =====================
-// WHATSAPP NOTIFICATION
-// =====================
+        } catch (Throwable $e) {
+            // HANYA rollback kalau memang masih dalam transaksi
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            $error = "Terjadi kesalahan saat menyimpan order: " . $e->getMessage();
+            // boleh di-log, tapi jangan print_r langsung ke output kalau mau redirect
+            // error_log($e->getMessage());
+        }
+
+        // Kalau ada error, jangan lanjut kirim WA
+        if ($error) {
+            // biarkan form dan alert error tampil
+        } else {
+
+            // ==========================
+            //  BAGIAN WHATSAPP (NON-DB)
+            // ==========================
+
             $stmtW = $pdo->prepare("
-    SELECT r.whatsapp, r.name
-    FROM users u
-    JOIN resellers r ON r.id = u.reseller_id
-    WHERE u.id = ?
-    LIMIT 1
-");
+                SELECT r.whatsapp, r.name
+                FROM users u
+                JOIN resellers r ON r.id = u.reseller_id
+                WHERE u.id = ?
+                LIMIT 1
+            ");
             $stmtW->execute([$user['id']]);
             $waData = $stmtW->fetch();
-            // ambil nomor WA reseller
-            $resWA = $waData['whatsapp'];
-            $adminWA = '6289529303412'; // nomor admin
-            // Ambil semua nama produk untuk kebutuhan WA
+
+            $resWA = $waData['whatsapp'] ?? null;
+            $adminWA = '6289529303412';
+
+            // Ambil nama produk
             $productMap = [];
             $ps = $pdo->query("SELECT id, name FROM products")->fetchAll();
             foreach ($ps as $pp) {
@@ -123,56 +140,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $itemsText = "";
             foreach ($items as $it) {
-
                 if ($it['product_id']) {
-                    // produk normal → ambil dari map
                     $name = $productMap[$it['product_id']] ?? ('Produk ID ' . $it['product_id']);
-                    $voltase = trim((string) $productMap[$it['voltage']]);
-                    if ($voltase !== '' && $voltase !== '-') {
-                        echo esc($voltase) . 'V';
+                    $voltase = ''; // kalau mau pakai voltage, ambil dari $it['voltage'], bukan $productMap
+                    if (!empty($it['voltage']) && $it['voltage'] !== '-') {
+                        $voltase = ' ' . $it['voltage'] . 'V';
                     }
                 } else {
-                    // produk custom
                     $name = $it['custom_name'];
+                    $voltase = '';
                 }
 
-                $itemsText .= "- {$name} {$voltase} ({$it['qty']} pcs)\n";
+                $itemsText .= "- {$name}{$voltase} ({$it['qty']} pcs)\n";
             }
 
-            // Pesan untuk reseller
             $msgReseller =
                 "🛒 *Order Berhasil Dibuat!*\n" .
                 "---------------------------------\n" .
                 "Kode Order: *{$orderCode}*\n" .
-                "Tanggal: " . date('d-m-Y H:i') . "\n" .
-                "\n*Daftar Item:*\n{$itemsText}" .
-                "\nStatus: Menunggu Konfirmasi Admin\n" .
-                "\nTerima kasih sudah order di RelayLab! 🙏";
+                "Tanggal: " . date('d-m-Y H:i') . "\n\n" .
+                "*Daftar Item:*\n{$itemsText}\n" .
+                "Status: Menunggu Konfirmasi Admin\n\n" .
+                "Terima kasih sudah order di RelayLab! 🙏";
 
-            // Pesan untuk admin
             $msgAdmin =
                 "📢 *Order Baru Masuk!*\n" .
                 "---------------------------------\n" .
                 "Kode Order: *{$orderCode}*\n" .
                 "Reseller: {$user['name']}\n" .
                 "WA: {$resWA}\n\n" .
-                "*Daftar Item:*\n{$itemsText}" .
-                "\nSegera review order ini di dashboard admin.";
+                "*Daftar Item:*\n{$itemsText}\n" .
+                "Segera review order ini di dashboard admin.";
 
-            // kirim WA
-            if ($resWA) {
-                send_wa_notification($resWA, $msgReseller);
+            try {
+                if ($resWA) {
+                    send_wa_notification($resWA, $msgReseller);
+                }
+                send_wa_notification($adminWA, $msgAdmin);
+            } catch (Throwable $e) {
+                // kalau WA gagal, order tetap tersimpan. Cukup di-log.
+                error_log('WA error: ' . $e->getMessage());
             }
-            send_wa_notification($adminWA, $msgAdmin);
-
 
             redirect('reseller/order_view.php?id=' . $orderId);
-        } catch (Throwable $e) {
-            $pdo->rollBack();
-            $error = "Terjadi kesalahan saat menyimpan order: " . $e->getMessage();
         }
     }
 }
+
 
 include __DIR__ . '/../partials/header.php';
 ?>
@@ -521,6 +535,7 @@ include __DIR__ . '/../partials/header.php';
 
                 <input type="hidden" name="product_id[]" value="${type === 'normal' ? pid : ''}">
                 <input type="hidden" name="custom_name[]" value="${type === 'custom' ? escapeHtmlAttr(name) : ''}">
+                <input type="hidden" name="voltage[]" value="${escapeHtmlAttr(voltage)}">
                 <input type="hidden" name="qty[]" class="qty-hidden" value="${qty}">
             </div>
         `;
