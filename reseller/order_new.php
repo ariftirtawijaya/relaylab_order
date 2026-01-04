@@ -14,11 +14,29 @@ if (!function_exists('format_rupiah')) {
     }
 }
 
+// ===============================
+// CEK: RESELLER SPECIAL / BUKAN
+// ===============================
+$stmtR = $pdo->prepare("SELECT is_special FROM resellers WHERE id = ?");
+$stmtR->execute([$user['reseller_id']]);
+$resellerRow = $stmtR->fetch(PDO::FETCH_ASSOC);
+
+$isSpecialReseller = $resellerRow && (int) $resellerRow['is_special'] === 1;
+// Aturan minimum per item
+$minQtyPerItem = $isSpecialReseller ? 1 : 10;
+
 // Ambil semua produk aktif
 $stmt = $pdo->query("SELECT id, name, voltage, price FROM products WHERE is_active = 1 ORDER BY name");
 $products = $stmt->fetchAll();
 
+// Lookup produk by ID (buat rebuild keranjang & WA)
+$productLookup = [];
+foreach ($products as $p) {
+    $productLookup[$p['id']] = $p;
+}
+
 $error = '';
+$items = []; // akan diisi saat POST
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes_reseller = trim($_POST['notes_reseller'] ?? '');
@@ -29,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $qtys = $_POST['qty'] ?? [];
 
     $items = [];
+    $minQtyError = false; // flag kalau ada item di bawah minimum
 
     if (is_array($qtys)) {
         $count = count($qtys);
@@ -38,10 +57,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $qty = (int) ($qtys[$i] ?? 0);
             $volt = $voltages[$i] ?? null;
 
-            if ($qty <= 0)
+            if ($qty <= 0) {
                 continue;
+            }
+
+            // CEK MINIMUM QTY PER ITEM (berlaku untuk semua reseller, tapi nilainya beda)
+            if ($qty < $minQtyPerItem) {
+                $minQtyError = true;
+            }
 
             if ($pid > 0) {
+                // produk normal
                 $items[] = [
                     'product_id' => $pid,
                     'voltage' => $volt,
@@ -49,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'qty' => $qty,
                 ];
             } elseif ($cname !== '') {
+                // produk custom
                 $items[] = [
                     'product_id' => null,
                     'voltage' => $volt,
@@ -61,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($items)) {
         $error = "Minimal harus ada 1 produk di keranjang.";
+    } elseif ($minQtyError) {
+        $error = "Qty minimal per item untuk akun Anda adalah {$minQtyPerItem} pcs.";
     } else {
 
         // ==========================
@@ -99,20 +128,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->commit();
         } catch (Throwable $e) {
-            // HANYA rollback kalau memang masih dalam transaksi
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
 
             $error = "Terjadi kesalahan saat menyimpan order: " . $e->getMessage();
-            // boleh di-log, tapi jangan print_r langsung ke output kalau mau redirect
-            // error_log($e->getMessage());
         }
 
         // Kalau ada error, jangan lanjut kirim WA
-        if ($error) {
-            // biarkan form dan alert error tampil
-        } else {
+        if (!$error) {
 
             // ==========================
             //  BAGIAN WHATSAPP (NON-DB)
@@ -131,18 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $resWA = $waData['whatsapp'] ?? null;
             $adminWA = '6289529303412';
 
-            // Ambil nama produk
-            $productMap = [];
-            $ps = $pdo->query("SELECT id, name FROM products")->fetchAll();
-            foreach ($ps as $pp) {
-                $productMap[$pp['id']] = $pp['name'];
-            }
-
             $itemsText = "";
             foreach ($items as $it) {
                 if ($it['product_id']) {
-                    $name = $productMap[$it['product_id']] ?? ('Produk ID ' . $it['product_id']);
-                    $voltase = ''; // kalau mau pakai voltage, ambil dari $it['voltage'], bukan $productMap
+                    $pRow = $productLookup[$it['product_id']] ?? null;
+                    $name = $pRow['name'] ?? ('Produk ID ' . $it['product_id']);
+                    $voltase = '';
                     if (!empty($it['voltage']) && $it['voltage'] !== '-') {
                         $voltase = ' ' . $it['voltage'] . 'V';
                     }
@@ -178,7 +196,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 send_wa_notification($adminWA, $msgAdmin);
             } catch (Throwable $e) {
-                // kalau WA gagal, order tetap tersimpan. Cukup di-log.
                 error_log('WA error: ' . $e->getMessage());
             }
 
@@ -186,7 +203,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
-
 
 include __DIR__ . '/../partials/header.php';
 ?>
@@ -196,6 +212,10 @@ include __DIR__ . '/../partials/header.php';
 <?php if ($error): ?>
     <div class="alert alert-danger"><?= esc($error) ?></div>
 <?php endif; ?>
+
+<p class="text-muted small">
+    Minimum order per item untuk akun Anda: <strong><?= (int) $minQtyPerItem ?> pcs</strong>.
+</p>
 
 <form method="post" id="orderForm">
     <div class="mb-3">
@@ -220,9 +240,7 @@ include __DIR__ . '/../partials/header.php';
 
     <!-- Info & Pagination Produk -->
     <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-        <div class="small text-muted" id="productCountInfo">
-            <!-- akan diisi via JS, contoh: "Menampilkan 1–8 dari 32 produk" -->
-        </div>
+        <div class="small text-muted" id="productCountInfo"></div>
         <nav>
             <ul class="pagination pagination-sm mb-0" id="productPagination"></ul>
         </nav>
@@ -270,10 +288,9 @@ include __DIR__ . '/../partials/header.php';
     <h5>Keranjang</h5>
     <div class="card mb-4">
         <div class="card-body">
-            <div id="cartList">
-                <!-- item keranjang akan ditambahkan via JS sebagai .cart-item -->
-            </div>
-            <!-- Tambahkan di bawah keranjang -->
+            <div id="cartList"></div>
+
+            <!-- Toast "produk ditambahkan" -->
             <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1055">
                 <div id="toastAdded" class="toast align-items-center text-bg-success border-0" role="alert">
                     <div class="d-flex">
@@ -297,9 +314,6 @@ include __DIR__ . '/../partials/header.php';
             </div>
         </div>
     </div>
-
-
-
 
     <!-- BAR BAWAH TOTAL (ikut submit) -->
     <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
@@ -346,6 +360,38 @@ include __DIR__ . '/../partials/header.php';
 </div>
 
 <script>
+    // Data keranjang awal (kalau POST gagal, kita rebuild dari server)
+    const initialCartItems = <?php
+    $initial = [];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error && !empty($items)) {
+        foreach ($items as $it) {
+            if ($it['product_id']) {
+                $pRow = $productLookup[$it['product_id']] ?? null;
+                $name = $pRow['name'] ?? ('Produk ID ' . $it['product_id']);
+                $voltage = $it['voltage'] ?? ($pRow['voltage'] ?? '');
+                $price = isset($pRow['price']) ? (int) $pRow['price'] : 0;
+                $type = 'normal';
+            } else {
+                $name = $it['custom_name'];
+                $voltage = $it['voltage'] ?? '';
+                $price = 0;
+                $type = 'custom';
+            }
+            $initial[] = [
+                'type' => $type,
+                'id' => $it['product_id'],
+                'name' => $name,
+                'voltage' => $voltage,
+                'price' => $price,
+                'qty' => (int) $it['qty'],
+            ];
+        }
+    }
+    echo json_encode($initial, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    ?>;
+</script>
+
+<script>
     document.addEventListener('DOMContentLoaded', function () {
         const cartList = document.getElementById('cartList');
         const grandTotalEl = document.getElementById('grandTotalDisplay');
@@ -358,10 +404,9 @@ include __DIR__ . '/../partials/header.php';
 
         const productCards = Array.from(productCardsNode);
 
-        // --- CONFIG PAGINATION ---
-        const PAGE_SIZE = 8; // jumlah card per halaman
-        let allCards = productCards.slice(); // seluruh kartu
-        let filteredCards = productCards.slice(); // setelah filter search
+        const PAGE_SIZE = 8;
+        let allCards = productCards.slice();
+        let filteredCards = productCards.slice();
         let currentPage = 1;
 
         let customModal;
@@ -395,7 +440,6 @@ include __DIR__ . '/../partials/header.php';
                     qty: qty
                 });
 
-                // setelah addCartRow(...)
                 const toastEl = document.getElementById('toastAdded');
                 if (window.bootstrap && toastEl) {
                     const toast = new bootstrap.Toast(toastEl);
@@ -422,9 +466,6 @@ include __DIR__ . '/../partials/header.php';
             return 'Rp ' + angka.toLocaleString('id-ID');
         }
 
-        // ============================
-        //  K E R A N J A N G
-        // ============================
         function recalcCart() {
             let total = 0;
 
@@ -466,7 +507,9 @@ include __DIR__ . '/../partials/header.php';
                 '"': '&quot;',
                 "'": '&#039;'
             };
-            return String(text).replace(/[&<>"']/g, function (m) { return map[m]; });
+            return String(text).replace(/[&<>"']/g, function (m) {
+                return map[m];
+            });
         }
 
         function escapeHtmlAttr(text) {
@@ -474,7 +517,6 @@ include __DIR__ . '/../partials/header.php';
         }
 
         function addCartRow(product) {
-            // product: {type, id, name, voltage, price, qty}
             const type = product.type || 'normal';
             const pid = product.id || '';
             const name = product.name || '';
@@ -540,7 +582,6 @@ include __DIR__ . '/../partials/header.php';
             </div>
         `;
 
-            // event qty +/- dan hapus
             const minusBtn = item.querySelector('.btn-qty-minus');
             const plusBtn = item.querySelector('.btn-qty-plus');
             const qtyInput = item.querySelector('.qty-input');
@@ -581,14 +622,7 @@ include __DIR__ . '/../partials/header.php';
             recalcCart();
         }
 
-
-
-
-        // ============================
-        //  P R O D U K  G R I D  +  P A G E
-        // ============================
-
-        // Klik "Tambah" pada kartu produk → masuk keranjang
+        // Produk grid → klik "Tambah" masuk keranjang
         productCards.forEach(card => {
             const btn = card.querySelector('.btn-add-product');
             if (!btn) return;
@@ -608,7 +642,6 @@ include __DIR__ . '/../partials/header.php';
                     qty: 1
                 });
 
-                // setelah addCartRow(...)
                 const toastEl = document.getElementById('toastAdded');
                 if (window.bootstrap && toastEl) {
                     const toast = new bootstrap.Toast(toastEl);
@@ -617,7 +650,6 @@ include __DIR__ . '/../partials/header.php';
             });
         });
 
-        // Tampilkan hanya kartu-kartu di halaman tertentu
         function showPage(page) {
             if (filteredCards.length === 0) {
                 productCards.forEach(c => c.parentElement.classList.add('d-none'));
@@ -634,10 +666,8 @@ include __DIR__ . '/../partials/header.php';
             const startIndex = (currentPage - 1) * PAGE_SIZE;
             const endIndex = startIndex + PAGE_SIZE;
 
-            // hide semua
             productCards.forEach(card => card.parentElement.classList.add('d-none'));
 
-            // show yang di halaman
             filteredCards.slice(startIndex, endIndex).forEach(card => {
                 card.parentElement.classList.remove('d-none');
             });
@@ -672,7 +702,6 @@ include __DIR__ . '/../partials/header.php';
 
             const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-            // Helper buat li
             function createPageItem(label, page, disabled = false, active = false) {
                 const li = document.createElement('li');
                 li.className = 'page-item';
@@ -695,25 +724,21 @@ include __DIR__ . '/../partials/header.php';
                 return li;
             }
 
-            // Prev
             productPagination.appendChild(
                 createPageItem('«', currentPage - 1, currentPage === 1)
             );
 
-            // Nomor halaman (simple: tampilkan semua; kalau nanti halaman sangat banyak baru kita bikin versi compact)
             for (let p = 1; p <= totalPages; p++) {
                 productPagination.appendChild(
                     createPageItem(String(p), p, false, p === currentPage)
                 );
             }
 
-            // Next
             productPagination.appendChild(
                 createPageItem('»', currentPage + 1, currentPage === totalPages)
             );
         }
 
-        // Filter produk berdasarkan search multi-kata
         function applyProductFilter() {
             const q = (productSearchInput?.value || '').toLowerCase().trim();
             const tokens = q.split(/\s+/).filter(Boolean);
@@ -723,7 +748,6 @@ include __DIR__ . '/../partials/header.php';
             } else {
                 filteredCards = allCards.filter(card => {
                     const text = (card.getAttribute('data-search') || '').toLowerCase();
-                    // semua kata harus ada
                     return tokens.every(t => text.indexOf(t) !== -1);
                 });
             }
@@ -738,10 +762,16 @@ include __DIR__ . '/../partials/header.php';
             });
         }
 
-        // Inisialisasi awal: tampilkan halaman 1 dengan semua produk
+        // Inisialisasi awal
         applyProductFilter();
+
+        // REBUILD KERANJANG kalau ada initialCartItems dari server (error submit sebelumnya)
+        if (Array.isArray(initialCartItems) && initialCartItems.length > 0) {
+            initialCartItems.forEach(function (it) {
+                addCartRow(it);
+            });
+        }
     });
 </script>
-
 
 <?php include __DIR__ . '/../partials/footer.php'; ?>
