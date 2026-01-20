@@ -68,6 +68,8 @@ $user = current_user();
                                     Saya</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('reseller/order_new.php') ?>">Buat
                                     Order</a></li>
+                            <li class="nav-item"><a class="nav-link" href="<?= base_url('reseller/report.php') ?>">Rekap
+                                    Order</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('reseller/profile.php') ?>">Profil</a>
                             </li>
                         <?php endif; ?>
