@@ -117,7 +117,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
             "---------------------------------\n" .
             "Kode Order: *{$orderCode}*\n" .
             "Tanggal: " . date('d-m-Y H:i') . "\n\n" .
-            "Halo *{$od['reseller_name']},* Order kamu sudah diproses dan sedang dikerjakan tim produksi RelayLab 🙏";
+            "Halo *{$od['reseller_name']},* Order kamu sudah diproses dan sedang dikerjakan tim produksi RelayLab 🙏\n";
+        "Silahkan lakukan pembayaran sesuai nominal yang tertera di Dashboard ke rekening dibawah ini :\n\n";
+        "BCA a.n Moch Arif Tirta Wijaya\n";
+        "1810803386";
 
         send_wa_notification($resWA, $msg);
     }
@@ -153,10 +156,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
     $notes = trim($_POST['notes'] ?? '-');
 
     // Tanggal kirim manual, fallback ke sekarang
-    $shipDate = trim($_POST['ship_date'] ?? '');
-    if ($shipDate === '') {
-        $shipDate = date('Y-m-d H:i:s');
+    $shipDateInput = trim($_POST['ship_date'] ?? '');
+
+    if ($shipDateInput === '') {
+        // kalau kosong, pakai sekarang
+        $ts = time();
+    } else {
+        // datetime-local format: 2025-12-18T11:35
+        $ts = strtotime($shipDateInput);
+        if ($ts === false) {
+            $ts = time(); // fallback kalau parsing gagal
+        }
     }
+
+    // format untuk simpan di DB (kolom DATETIME)
+    $shipDate = date('Y-m-d H:i:s', $ts);
+    // format untuk kirim ke WhatsApp
+    $shipDateForWa = date('d-m-Y H:i', $ts);
 
     // Ambil qty yang dikirim
     $qty_ship = $_POST['ship_qty'] ?? [];
@@ -310,7 +326,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_shipment'])) {
                     "Pesanan kamu sudah dikirim!\n\n" .
                     "*Ekspedisi:* {$courier}\n" .
                     "*No Resi:* {$tracking}\n" .
-                    "*Tanggal:* {$shipDate}\n" .
+                    "*Tanggal:* {$shipDateForWa}\n" .
                     "*Catatan:* {$notes}\n\n" .
                     "*Produk yang dikirim:*\n{$itemText}\n" .
                     ($resiFilename ? "Foto resi terlampir di atas.\n\n" : "\n") .
