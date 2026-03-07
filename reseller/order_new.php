@@ -23,7 +23,7 @@ $resellerRow = $stmtR->fetch(PDO::FETCH_ASSOC);
 
 $isSpecialReseller = $resellerRow && (int) $resellerRow['is_special'] === 1;
 // Aturan minimum per item
-$minQtyPerItem = $isSpecialReseller ? 1 : 10;
+$minQtyPerItem = $isSpecialReseller ? 1 : 5;
 
 // Ambil semua produk aktif
 $stmt = $pdo->query("SELECT id, name, voltage, price FROM products WHERE is_active = 1 ORDER BY name");
