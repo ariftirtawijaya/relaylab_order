@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_payment'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $status = $_POST['status'] ?? 'menunggu_konfirmasi';
-    if (!in_array($status, ['menunggu_konfirmasi', 'diproses', 'selesai'], true)) {
+    if (!in_array($status, ['menunggu_konfirmasi', 'dibatalkan', 'diproses', 'selesai'], true)) {
         $status = 'menunggu_konfirmasi';
     }
 
@@ -477,6 +477,9 @@ include __DIR__ . '/../partials/header.php';
                             <option value="diproses" <?= $order['status'] == 'diproses' ? 'selected' : ''; ?>>Diproses
                             </option>
                             <option value="selesai" <?= $order['status'] == 'selesai' ? 'selected' : ''; ?>>Selesai
+                            </option>
+                            <option value="dibatalkan" <?= $order['status'] == 'dibatalkan' ? 'selected' : ''; ?>>
+                                Dibatalkan
                             </option>
                         </select>
                     </div>

@@ -52,6 +52,8 @@ function badge_status($status)
     switch ($status) {
         case 'menunggu_konfirmasi':
             return 'warning';  // kuning
+        case 'dibatalkan':
+            return 'danger';  // kuning
         case 'diproses':
             return 'primary';  // biru
         case 'selesai':
